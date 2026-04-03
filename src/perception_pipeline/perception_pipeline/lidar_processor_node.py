@@ -104,6 +104,49 @@ def _numpy_to_pc2(points: np.ndarray, header: Header) -> PointCloud2:
     return msg
 
 
+# ── Voxel downsampling with intensity ─────────────────────────────────────────
+
+def _voxel_downsample(
+    xyz: np.ndarray,
+    intensity: np.ndarray,
+    voxel_size: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Voxel grid downsample that averages both xyz and intensity per voxel.
+
+    Open3D's voxel_down_sample only stores xyz and silently drops intensity.
+    This numpy implementation preserves it by averaging within each voxel cell.
+
+    Args:
+        xyz:        (N, 3) float32 point coordinates.
+        intensity:  (N, 1) float32 per-point intensities.
+        voxel_size: Leaf size in metres.
+
+    Returns:
+        Tuple of (xyz_down (M, 3), intensity_down (M, 1)) float32 arrays.
+    """
+    voxel_coords = np.floor(xyz / voxel_size).astype(np.int32)
+
+    # Encode each 3-D voxel index into a single bytes key for np.unique
+    keys = np.ascontiguousarray(voxel_coords).view(
+        np.dtype((np.void, voxel_coords.dtype.itemsize * 3))
+    ).ravel()
+
+    _, inverse = np.unique(keys, return_inverse=True)
+    n_voxels = int(_.shape[0])
+
+    xyz_out = np.zeros((n_voxels, 3), dtype=np.float32)
+    int_out = np.zeros((n_voxels, 1), dtype=np.float32)
+    counts  = np.zeros(n_voxels,     dtype=np.float32)
+
+    np.add.at(xyz_out,        inverse, xyz)
+    np.add.at(int_out[:, 0],  inverse, intensity[:, 0])
+    np.add.at(counts,         inverse, 1.0)
+
+    xyz_out /= counts[:, np.newaxis]
+    int_out /= counts[:, np.newaxis]
+    return xyz_out, int_out
+
+
 # ── Preprocessing pipeline ────────────────────────────────────────────────────
 
 class LidarPreprocessor:
@@ -159,11 +202,9 @@ class LidarPreprocessor:
                     "stats": {"n_input": len(points_xyzi), "n_roi": 0,
                               "n_voxel": 0, "n_ground": 0, "n_output": 0}}
 
-        # ── Stage 2: Voxel downsampling ───────────────────────────────────────
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(xyz_roi)
-        pcd_down = pcd.voxel_down_sample(voxel_size=self.voxel_size)
-        xyz_down = np.asarray(pcd_down.points, dtype=np.float32)
+        # ── Stage 2: Voxel downsampling (numpy — preserves intensity) ────────
+        xyz_down, intensity_down = _voxel_downsample(
+            xyz_roi, int_roi, self.voxel_size)
         n_after_voxel = len(xyz_down)
 
         if n_after_voxel < 10:
@@ -171,9 +212,6 @@ class LidarPreprocessor:
             return {"filtered": empty, "ground": empty,
                     "stats": {"n_input": len(points_xyzi), "n_roi": n_after_roi,
                               "n_voxel": 0, "n_ground": 0, "n_output": 0}}
-
-        # Voxel downsampling loses per-point intensity; use zeros for downsampled cloud
-        intensity_down = np.zeros((n_after_voxel, 1), dtype=np.float32)
 
         # ── Stage 3: Distance filter ──────────────────────────────────────────
         dist = np.linalg.norm(xyz_down, axis=1)

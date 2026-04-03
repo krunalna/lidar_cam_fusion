@@ -99,13 +99,13 @@ LidarPreprocessorResult LidarPreprocessor::process(
   result.stats.n_output = static_cast<uint32_t>(filtered_cloud->size());
 
   // ── Pack results into flat float buffers ──────────────────────────────────
-  // Intensity: voxel grid averages it; zero it out to match Python behaviour
+  // PCL VoxelGrid averages intensity within each voxel — preserved as-is.
   result.filtered.reserve(filtered_cloud->size() * 4);
   for (const auto & pt : *filtered_cloud) {
     result.filtered.push_back(pt.x);
     result.filtered.push_back(pt.y);
     result.filtered.push_back(pt.z);
-    result.filtered.push_back(0.0f);  // intensity zeroed (voxel grid loses it)
+    result.filtered.push_back(pt.intensity);
   }
 
   result.ground.reserve(ground_cloud->size() * 4);
@@ -113,7 +113,7 @@ LidarPreprocessorResult LidarPreprocessor::process(
     result.ground.push_back(pt.x);
     result.ground.push_back(pt.y);
     result.ground.push_back(pt.z);
-    result.ground.push_back(0.0f);
+    result.ground.push_back(pt.intensity);
   }
 
   return result;
