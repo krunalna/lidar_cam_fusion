@@ -29,9 +29,9 @@ download-kitti = "python scripts/download_kitti.py"
 
 # ── C++ pipeline tasks ────────────────────────────────────────────────────────
 [feature.cpp.tasks]
-build-cpp          = "colcon build --symlink-install --packages-select perception_pipeline_cpp --cmake-args -DCMAKE_BUILD_TYPE=Release"
-launch-cpp         = "ros2 launch perception_pipeline_cpp fusion_pipeline_cpp.launch.py"
-verify-cpp-publisher = "python scripts/verify_cpp_publisher.py"
+build-cpp  = "colcon build --symlink-install --packages-select perception_pipeline_cpp --cmake-args -DCMAKE_BUILD_TYPE=Release"
+build-all  = "colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release"
+launch-cpp = "ros2 launch perception_pipeline_cpp fusion_pipeline_cpp.launch.py"
 
 # ── ROS 2 Jazzy (Python 3.12, Ubuntu 24.04 / macOS) ──────────────────────────
 [feature.jazzy]
@@ -54,6 +54,7 @@ ros-jazzy-foxglove-bridge = "*"
 cmake     = ">=3.22"
 ninja     = "*"
 libopencv = ">=4.7"
+pcl       = ">=1.13"
 
 [feature.jazzy.activation]
 scripts = ["scripts/activate_ros.sh"]

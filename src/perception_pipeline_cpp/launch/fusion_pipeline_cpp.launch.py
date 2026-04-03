@@ -36,15 +36,36 @@ def generate_launch_description():
         description="Loop the sequence when it ends",
     )
 
-    # ── KITTI publisher (Phase 2 — C++) ──────────────────────────────────────
+    # ── KITTI publisher (Phase 2 — reused from Python package) ───────────────
     kitti_publisher = Node(
-        package="perception_pipeline_cpp",
-        executable="kitti_publisher_cpp",
+        package="perception_pipeline",
+        executable="kitti_publisher",
         name="kitti_publisher",
         parameters=[{
             "sequence_path": LaunchConfiguration("sequence_path"),
             "frame_rate":    LaunchConfiguration("frame_rate"),
             "loop":          LaunchConfiguration("loop"),
+        }],
+        output="screen",
+        emulate_tty=True,
+    )
+
+    # ── LiDAR processor (Phase 3 — C++) ──────────────────────────────────────
+    lidar_processor = Node(
+        package="perception_pipeline_cpp",
+        executable="lidar_processor_cpp",
+        name="lidar_processor",
+        parameters=[{
+            "roi_x_min":   0.0,
+            "roi_x_max":  50.0,
+            "roi_y_min": -10.0,
+            "roi_y_max":  10.0,
+            "roi_z_min":  -3.0,
+            "roi_z_max":   2.0,
+            "voxel_size":  0.1,
+            "ransac_dist": 0.2,
+            "ransac_iter": 100,
+            "max_depth":  50.0,
         }],
         output="screen",
         emulate_tty=True,
@@ -56,4 +77,5 @@ def generate_launch_description():
         loop_arg,
         LogInfo(msg="Starting LiDAR-Camera Fusion Pipeline — C++ (KITTI playback)"),
         kitti_publisher,
+        lidar_processor,
     ])
