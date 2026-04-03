@@ -13,7 +13,7 @@ A **ROS 2 LiDAR-Camera fusion perception pipeline** that runs entirely on KITTI 
 | 1 | Environment & workspace setup (Pixi + ROS 2 Jazzy) | Done |
 | 2 | KITTI publisher node (`/camera/image_raw`, `/lidar/points`) | Done |
 | 3 | LiDAR processor node (ROI → voxel → distance → RANSAC ground removal) | Done |
-| 4 | Camera detector node (YOLOv8 → `/detections_2d`) | Planned |
+| 4 | Camera detector node (YOLOv8 → `/detections_2d`) | Done |
 | 5 | Calibration utilities + projection math | Planned |
 | 6 | Fusion node (frustum-based → `/detections_3d_fused`) | Planned |
 | 7 | Visualization (RViz2) + KITTI validation | Planned |
@@ -59,17 +59,54 @@ pixi run build                            # colcon build --symlink-install
 pixi run verify1                          # check Python 3.12+, ROS 2 Jazzy, all deps
 pixi run verify2                          # KITTI publisher: imports, conversion, ROS dry-run
 pixi run verify3                          # LiDAR processor: preprocessing stages, ROS dry-run
+pixi run verify_camera_detector           # camera detector: YOLOv8 inference dry-run
 
 pixi run download-kitti                   # default: 2011_09_26 seq 0001 (~380 MB)
 pixi run download-kitti -- --list
 pixi run download-kitti -- --sequence 0005
 
-export KITTI_SEQ=/path/to/2011_09_26/2011_09_26_drive_0001_sync
-pixi run launch
-KITTI_SEQ=... FRAME_RATE=20 LOOP=false pixi run launch
-
 pixi run play-bag                         # requires BAG_PATH env var
 ```
+
+## Launching the Pipeline
+
+### Step-by-step (first time)
+
+```bash
+# 1. Download KITTI data (one-time, ~380 MB)
+pixi run download-kitti
+
+# 2. Build the workspace
+pixi run build
+
+# 3. Launch all nodes
+KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync pixi run launch
+```
+
+### Launch with options
+
+```bash
+# Default: seq 0001, 10 Hz, loop=true
+KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync pixi run launch
+
+# Custom frame rate, no loop
+KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync \
+  FRAME_RATE=20 LOOP=false pixi run launch
+
+# Different sequence (download it first)
+KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0005_sync pixi run launch
+```
+
+### Expected startup logs (healthy)
+
+```
+[kitti_publisher-1]  KittiPublisher ready — 114 frames @ 10.0 Hz  loop=True
+[lidar_processor-2]  LidarProcessor ready — waiting for /lidar/points
+[camera_detector-3]  YOLOv8 model loaded.
+[camera_detector-3]  CameraDetector ready — waiting for /camera/image_raw
+```
+
+> Note: CycloneDDS `Protocol family not supported` errors on macOS are harmless — thread affinity is a Linux-only feature.
 
 ## ROS 2 Topics
 
@@ -79,7 +116,7 @@ pixi run play-bag                         # requires BAG_PATH env var
 | `/lidar/points` | `sensor_msgs/PointCloud2` | kitti_publisher | best-effort, depth 1 |
 | `/lidar/filtered` | `sensor_msgs/PointCloud2` | lidar_processor | reliable, depth 5 |
 | `/lidar/ground_plane` | `sensor_msgs/PointCloud2` | lidar_processor | reliable, depth 5 |
-| `/detections_2d` | `vision_msgs/Detection2DArray` | camera_detector | *(planned)* |
+| `/detections_2d` | `vision_msgs/Detection2DArray` | camera_detector | reliable, depth 5 |
 | `/detections_3d_fused` | `vision_msgs/Detection3DArray` | fusion_node | *(planned)* |
 
 ## Key Source Files
@@ -129,4 +166,5 @@ Default path (gitignored): `data/kitti/2011_09_26/2011_09_26_drive_0001_sync/`
 
 - `kitti_publisher` → `perception_pipeline.kitti_publisher_node:main`
 - `lidar_processor` → `perception_pipeline.lidar_processor_node:main`
-- `camera_detector`, `fusion_node` — defined, not yet implemented
+- `camera_detector` → `perception_pipeline.camera_detector_node:main`
+- `fusion_node` — defined, not yet implemented
