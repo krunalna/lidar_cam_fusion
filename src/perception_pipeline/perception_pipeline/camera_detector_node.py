@@ -16,6 +16,7 @@ Parameters:
   device          (str)    Inference device: 'cpu', 'cuda', 'mps' (default: 'cpu')
 """
 
+import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -29,7 +30,6 @@ from vision_msgs.msg import (
     ObjectHypothesis,
     BoundingBox2D,
 )
-from geometry_msgs.msg import Pose2D
 
 
 # ── Image conversion helper ───────────────────────────────────────────────────
@@ -137,8 +137,43 @@ class CameraDetectorNode(Node):
         )
         self._pub = self.create_publisher(Detection2DArray, "/detections_2d", pub_qos)
 
+        viz_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self._viz_pub = self.create_publisher(Image, "/camera/detections_viz", viz_qos)
+
         self._frame_count = 0
         self.get_logger().info("CameraDetector ready — waiting for /camera/image_raw")
+
+    def _draw_detections(
+        self, image_rgb: np.ndarray, detections: list[dict], header
+    ) -> Image:
+        """Draw bounding boxes + labels onto the image and return a sensor_msgs/Image."""
+        canvas = image_rgb.copy()
+        for d in detections:
+            x1, y1, x2, y2 = int(d["x1"]), int(d["y1"]), int(d["x2"]), int(d["y2"])
+            label = f"{d['class_name']} {d['confidence']:.2f}"
+
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            tag_y1 = max(y1 - th - 4, 0)
+            cv2.rectangle(canvas, (x1, tag_y1), (x1 + tw + 4, y1), (0, 255, 0), -1)
+            cv2.putText(
+                canvas, label, (x1 + 2, y1 - 3),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA,
+            )
+
+        msg = Image()
+        msg.header = header
+        msg.height, msg.width = canvas.shape[:2]
+        msg.encoding = "rgb8"
+        msg.is_bigendian = False
+        msg.step = msg.width * 3
+        msg.data = canvas.tobytes()
+        return msg
 
     def _on_image(self, msg: Image) -> None:
         try:
@@ -170,7 +205,9 @@ class CameraDetectorNode(Node):
             h  = d["y2"] - d["y1"]
 
             bbox = BoundingBox2D()
-            bbox.center = Pose2D(x=cx, y=cy, theta=0.0)
+            bbox.center.position.x = cx
+            bbox.center.position.y = cy
+            bbox.center.theta = 0.0
             bbox.size_x = w
             bbox.size_y = h
             det.bbox = bbox
@@ -186,6 +223,11 @@ class CameraDetectorNode(Node):
             out_msg.detections.append(det)
 
         self._pub.publish(out_msg)
+
+        # ── Visualization (only when Foxglove/RViz is subscribed) ─────────────
+        if self._viz_pub.get_subscription_count() > 0:
+            viz_msg = self._draw_detections(image_rgb, detections, msg.header)
+            self._viz_pub.publish(viz_msg)
 
         self._frame_count += 1
         if self._frame_count % 20 == 0:
