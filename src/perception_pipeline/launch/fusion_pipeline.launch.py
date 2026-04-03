@@ -72,6 +72,20 @@ def generate_launch_description():
         emulate_tty=True,
     )
 
+    # ── Camera detector (Step 4) ──────────────────────────────────────────────
+    camera_detector = Node(
+        package="perception_pipeline",
+        executable="camera_detector",
+        name="camera_detector",
+        parameters=[{
+            "model_name":     "yolov8n.pt",
+            "conf_threshold":  0.5,
+            "device":         "cpu",
+        }],
+        output="screen",
+        emulate_tty=True,
+    )
+
     return LaunchDescription([
         seq_arg,
         rate_arg,
@@ -79,5 +93,5 @@ def generate_launch_description():
         LogInfo(msg="Starting LiDAR-Camera Fusion Pipeline (KITTI playback)"),
         kitti_publisher,
         lidar_processor,
-        # camera_detector node added in Step 4
+        camera_detector,
     ])
