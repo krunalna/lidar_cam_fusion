@@ -242,6 +242,15 @@ Default path (gitignored): `data/kitti/2011_09_26/2011_09_26_drive_0001_sync/`
 - `lidar_processor_cpp` — Phase 3 C++ node
 - `camera_detector_cpp` — Phase 4 C++ node (requires `YOLO_ONNX`)
 
+## TODO
+
+- [ ] **C++ profiling** — measure per-stage frame budget using `std::chrono::steady_clock` timestamps around `preprocess()`, ONNX inference, and `postprocess()` in `camera_detector.cpp`, and around each PCL stage (`CropBox`, `VoxelGrid`, RANSAC) in `lidar_preprocessor.cpp`. Key suspects: RANSAC (100 iter × ~9k points), ONNX postprocess inner loop (80 classes × 8400 anchors = 672k iterations/frame), `pc2_to_floats` per-point branch on 115k points. Build with `RelWithDebInfo` and use macOS Instruments (`xcrun xctrace`) or inline timing logs for stage-level breakdown.
+- [ ] Phase 5 Python — Calibration utilities + projection math (`utils/calibration.py`, `utils/projection.py`)
+- [ ] Phase 5 C++ — Calibration utilities + projection math (after Python Phase 5)
+- [ ] Phase 6 Python — Fusion node (`fusion_node.py`)
+- [ ] Phase 6 C++ — Fusion node (`fusion_node_cpp`)
+- [ ] Phase 7 — RViz2 visualization + KITTI validation
+
 ## macOS Build Notes (C++)
 
 Four macOS-specific workarounds are in `CMakeLists.txt`:
