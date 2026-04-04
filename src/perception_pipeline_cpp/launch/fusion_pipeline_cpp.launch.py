@@ -7,9 +7,16 @@ Environment variables:
   KITTI_SEQ   Path to the KITTI raw sync sequence directory (required)
   FRAME_RATE  Playback rate in Hz (default: 10.0)
   LOOP        Loop the sequence: true/false (default: true)
+  YOLO_ONNX   Absolute path to yolov8n.onnx (required for camera_detector_cpp)
 
 Example:
-  KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync pixi run launch-cpp
+  # 1. Export the ONNX model once
+  pixi run export-onnx
+
+  # 2. Launch
+  KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync \\
+  YOLO_ONNX=$(pwd)/models/yolov8n.onnx \\
+  pixi run launch-cpp
 """
 
 import os
@@ -34,6 +41,11 @@ def generate_launch_description():
         "loop",
         default_value=os.environ.get("LOOP", "true"),
         description="Loop the sequence when it ends",
+    )
+    model_arg = DeclareLaunchArgument(
+        "model_path",
+        default_value=os.environ.get("YOLO_ONNX", ""),
+        description="Absolute path to yolov8n.onnx (export with: pixi run export-onnx)",
     )
 
     # ── KITTI publisher (Phase 2 — reused from Python package) ───────────────
@@ -71,11 +83,27 @@ def generate_launch_description():
         emulate_tty=True,
     )
 
+    # ── Camera detector (Phase 4 — C++, ONNX Runtime) ────────────────────────
+    camera_detector = Node(
+        package="perception_pipeline_cpp",
+        executable="camera_detector_cpp",
+        name="camera_detector",
+        parameters=[{
+            "model_path":     LaunchConfiguration("model_path"),
+            "conf_threshold": 0.5,
+            "iou_threshold":  0.45,
+        }],
+        output="screen",
+        emulate_tty=True,
+    )
+
     return LaunchDescription([
         seq_arg,
         rate_arg,
         loop_arg,
+        model_arg,
         LogInfo(msg="Starting LiDAR-Camera Fusion Pipeline — C++ (KITTI playback)"),
         kitti_publisher,
         lidar_processor,
+        camera_detector,
     ])

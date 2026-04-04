@@ -15,6 +15,8 @@ scipy = "*"
 [feature.base.pypi-dependencies]
 opencv-python = ">=4.7"
 ultralytics = ">=8.0"
+onnx = ">=1.12.0,<2.0.0"
+onnxslim = ">=0.1.71"
 
 [feature.base.tasks]
 build    = "colcon build --symlink-install --packages-select perception_pipeline"
@@ -26,13 +28,15 @@ verify-publisher = "python scripts/verify_publisher.py"
 verify3       = "python scripts/verify_step3.py"
 verify_camera_detector = "python scripts/verify_step4.py"
 download-kitti = "python scripts/download_kitti.py"
+export-onnx    = "python scripts/export_yolo_onnx.py"
 
 # ── C++ pipeline tasks ────────────────────────────────────────────────────────
 [feature.cpp.tasks]
-build-cpp        = "colcon build --symlink-install --packages-select perception_pipeline_cpp --cmake-args -DCMAKE_BUILD_TYPE=Release"
-build-all        = "colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release"
-launch-cpp       = "ros2 launch perception_pipeline_cpp fusion_pipeline_cpp.launch.py"
-verify-cpp-lidar = "python scripts/verify_cpp_lidar.py"
+build-cpp          = "colcon build --symlink-install --packages-select perception_pipeline_cpp --cmake-args -DCMAKE_BUILD_TYPE=Release"
+build-all          = "colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release"
+launch-cpp         = "ros2 launch perception_pipeline_cpp fusion_pipeline_cpp.launch.py"
+verify-cpp-lidar   = "python scripts/verify_cpp_lidar.py"
+verify-cpp-camera  = "python scripts/verify_cpp_camera.py"
 
 # ── ROS 2 Jazzy (Python 3.12, Ubuntu 24.04 / macOS) ──────────────────────────
 [feature.jazzy]
@@ -52,10 +56,11 @@ ros-jazzy-foxglove-bridge = "*"
 
 # ── C++ build deps ────────────────────────────────────────────────────────────
 [feature.cpp.dependencies]
-cmake     = ">=3.22"
-ninja     = "*"
-libopencv = ">=4.7"
-pcl       = ">=1.13"
+cmake        = ">=3.22"
+ninja        = "*"
+libopencv    = ">=4.7"
+pcl          = ">=1.13"
+onnxruntime  = ">=1.17"
 
 [feature.jazzy.activation]
 scripts = ["scripts/activate_ros.sh"]
