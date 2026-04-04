@@ -84,6 +84,7 @@ public:
         cfg.model_path     = get_parameter("model_path").as_string();
         cfg.conf_threshold = static_cast<float>(get_parameter("conf_threshold").as_double());
         cfg.iou_threshold  = static_cast<float>(get_parameter("iou_threshold").as_double());
+        conf_threshold_    = cfg.conf_threshold;
 
         if (cfg.model_path.empty()) {
             RCLCPP_FATAL(get_logger(),
@@ -102,8 +103,10 @@ public:
         RCLCPP_INFO(get_logger(), "ONNX model loaded.");
 
         // ── QoS ─────────────────────────────────────────────────────────────
-        rclcpp::QoS sub_qos(rclcpp::KeepLast(1));
-        sub_qos.best_effort();
+        // kitti_publisher publishes /camera/image_raw with RELIABLE depth 5 —
+        // subscriber must match or CycloneDDS on macOS silently drops the connection.
+        rclcpp::QoS sub_qos(rclcpp::KeepLast(5));
+        sub_qos.reliable();
 
         rclcpp::QoS pub_qos(rclcpp::KeepLast(5));
         pub_qos.reliable();
@@ -127,22 +130,50 @@ public:
 private:
     void on_image(const sensor_msgs::msg::Image::SharedPtr msg)
     {
-        const int W = static_cast<int>(msg->width);
-        const int H = static_cast<int>(msg->height);
+        const int W    = static_cast<int>(msg->width);
+        const int H    = static_cast<int>(msg->height);
+        // Use step (bytes per row) to derive expected data size — handles any row stride
+        const size_t expected = static_cast<size_t>(msg->step) * static_cast<size_t>(H);
 
-        if (msg->data.size() != static_cast<size_t>(H * W * 3)) {
-            RCLCPP_ERROR(get_logger(), "Unexpected image data size %zu (expected %d)",
-                         msg->data.size(), H * W * 3);
+        // Log the very first frame so we know images are arriving
+        if (frame_count_ == 0) {
+            RCLCPP_INFO(get_logger(),
+                "First image received: %dx%d  encoding=%s  step=%u  data=%zu bytes",
+                W, H, msg->encoding.c_str(), msg->step, msg->data.size());
+        }
+
+        if (msg->data.size() < expected) {
+            RCLCPP_ERROR(get_logger(),
+                "Image data too small: got %zu bytes, need %zu (step=%u h=%d)",
+                msg->data.size(), expected, msg->step, H);
+            // Still publish an empty array so the topic appears live
+            vision_msgs::msg::Detection2DArray empty;
+            empty.header = msg->header;
+            pub_det_->publish(empty);
+            ++frame_count_;
             return;
         }
 
+        // Run inference — always publish the result (empty on failure)
         std::vector<Detection> dets;
         try {
             dets = detector_->detect(msg->data.data(), W, H);
         } catch (const std::exception & e) {
-            RCLCPP_ERROR(get_logger(), "Inference failed on frame %u: %s",
+            RCLCPP_ERROR(get_logger(), "Inference error on frame %u: %s",
                          frame_count_, e.what());
-            return;
+        }
+
+        // First-frame diagnostic: confirm detections are being generated
+        if (frame_count_ == 0) {
+            RCLCPP_INFO(get_logger(),
+                "%zu detection(s) on first frame (conf_threshold=%.2f)",
+                dets.size(), conf_threshold_);
+            if (dets.empty()) {
+                RCLCPP_WARN(get_logger(),
+                    "No detections on first frame — if this persists, try lowering "
+                    "conf_threshold (current=%.2f) via ROS param or launch file",
+                    conf_threshold_);
+            }
         }
 
         // ── Publish Detection2DArray ─────────────────────────────────────────
@@ -168,8 +199,8 @@ private:
         }
         pub_det_->publish(out);
 
-        // ── Visualisation (only when subscribed) ─────────────────────────────
-        if (pub_viz_->get_subscription_count() > 0) {
+        // ── Visualisation (always publish so Foxglove/RViz can see it) ──────────
+        {
             cv::Mat canvas(H, W, CV_8UC3, const_cast<uint8_t *>(msg->data.data()));
             cv::Mat annotated = canvas.clone();
             draw_detections(annotated, dets);
@@ -187,7 +218,7 @@ private:
         }
 
         ++frame_count_;
-        if (frame_count_ % 20 == 0) {
+        if (frame_count_ <= 3 || frame_count_ % 20 == 0) {
             RCLCPP_INFO(get_logger(), "Frame %u | %zu detection(s)",
                         frame_count_, dets.size());
         }
@@ -197,6 +228,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr         sub_;
     rclcpp::Publisher<vision_msgs::msg::Detection2DArray>::SharedPtr pub_det_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr            pub_viz_;
+    float    conf_threshold_{0.5f};
     uint32_t frame_count_{0};
 };
 
