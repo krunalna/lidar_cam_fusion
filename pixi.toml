@@ -37,6 +37,7 @@ build-all          = "colcon build --symlink-install --cmake-args -DCMAKE_BUILD_
 launch-cpp         = "ros2 launch perception_pipeline_cpp fusion_pipeline_cpp.launch.py"
 verify-cpp-lidar   = "python scripts/verify_cpp_lidar.py"
 verify-cpp-camera  = "python scripts/verify_cpp_camera.py"
+verify_projections = "python scripts/verify_projections.py"
 
 # ── ROS 2 Jazzy (Python 3.12, Ubuntu 24.04 / macOS) ──────────────────────────
 [feature.jazzy]

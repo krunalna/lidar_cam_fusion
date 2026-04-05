@@ -115,6 +115,20 @@ if(APPLE)
   find_library(_python_lib python3.12 HINTS "$ENV{CONDA_PREFIX}/lib")
 endif()
 
+# ── calib_utils (Phase 5 — static library, no ROS dependency) ────────────────
+add_library(calib_utils STATIC
+  src/calibration.cpp
+  src/projector.cpp
+)
+target_include_directories(calib_utils
+  PUBLIC
+    include
+    ${OpenCV_INCLUDE_DIRS}
+)
+target_link_libraries(calib_utils
+  ${OpenCV_LIBS}
+)
+
 # ── lidar_processor_cpp ───────────────────────────────────────────────────────
 add_executable(lidar_processor_cpp
   src/lidar_preprocessor.cpp
@@ -165,7 +179,7 @@ if(APPLE)
 endif()
 
 # ── Install ───────────────────────────────────────────────────────────────────
-install(TARGETS lidar_processor_cpp camera_detector_cpp
+install(TARGETS calib_utils lidar_processor_cpp camera_detector_cpp
   DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY include/
@@ -178,6 +192,20 @@ install(DIRECTORY launch/
 # ── Tests ─────────────────────────────────────────────────────────────────────
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+
+  # Resolve path to calibration.yaml (installed alongside perception_pipeline)
+  set(_calib_yaml
+    "${CMAKE_CURRENT_SOURCE_DIR}/../perception_pipeline/config/calibration.yaml")
+  if(NOT EXISTS "${_calib_yaml}")
+    # Fallback: installed share directory
+    set(_calib_yaml
+      "${CMAKE_INSTALL_PREFIX}/../perception_pipeline/share/perception_pipeline/config/calibration.yaml")
+  endif()
+
+  ament_add_gtest(test_projector test/test_projector.cpp)
+  target_link_libraries(test_projector calib_utils)
+  target_compile_definitions(test_projector PRIVATE
+    CALIBRATION_YAML_PATH="${_calib_yaml}")
 endif()
 
 ament_package()
