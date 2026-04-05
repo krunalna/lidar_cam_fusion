@@ -38,6 +38,7 @@ launch-cpp         = "ros2 launch perception_pipeline_cpp fusion_pipeline_cpp.la
 verify-cpp-lidar   = "python scripts/verify_cpp_lidar.py"
 verify-cpp-camera  = "python scripts/verify_cpp_camera.py"
 verify_projections = "python scripts/verify_projections.py"
+verify_fusion      = "python scripts/verify_fusion.py"
 
 # ── ROS 2 Jazzy (Python 3.12, Ubuntu 24.04 / macOS) ──────────────────────────
 [feature.jazzy]

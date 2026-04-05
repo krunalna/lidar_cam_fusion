@@ -24,6 +24,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
@@ -46,6 +47,17 @@ def generate_launch_description():
         "model_path",
         default_value=os.environ.get("YOLO_ONNX", ""),
         description="Absolute path to yolov8n.onnx (export with: pixi run export-onnx)",
+    )
+
+    _calib_default = os.environ.get(
+        "CALIB_FILE",
+        os.path.join(
+            get_package_share_directory("perception_pipeline"),
+            "config", "calibration.yaml"))
+    calib_arg = DeclareLaunchArgument(
+        "calibration_file",
+        default_value=_calib_default,
+        description="Path to KITTI calibration YAML",
     )
 
     # ── KITTI publisher (Phase 2 — reused from Python package) ───────────────
@@ -97,13 +109,29 @@ def generate_launch_description():
         emulate_tty=True,
     )
 
+    # ── Fusion node (Phase 6 — C++) ──────────────────────────────────────────
+    fusion_node = Node(
+        package="perception_pipeline_cpp",
+        executable="fusion_node_cpp",
+        name="fusion_node",
+        parameters=[{
+            "calibration_file":   LaunchConfiguration("calibration_file"),
+            "min_cluster_points": 5,
+            "sync_slop":          0.1,
+        }],
+        output="screen",
+        emulate_tty=True,
+    )
+
     return LaunchDescription([
         seq_arg,
         rate_arg,
         loop_arg,
         model_arg,
+        calib_arg,
         LogInfo(msg="Starting LiDAR-Camera Fusion Pipeline — C++ (KITTI playback)"),
         kitti_publisher,
         lidar_processor,
         camera_detector,
+        fusion_node,
     ])

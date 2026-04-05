@@ -29,6 +29,8 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(vision_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(message_filters REQUIRED)
 
 # ── PCL ───────────────────────────────────────────────────────────────────────
 find_package(PCL REQUIRED COMPONENTS common filters segmentation)
@@ -122,6 +124,7 @@ endif()
 add_library(calib_utils STATIC
   src/calibration.cpp
   src/projector.cpp
+  src/fusion_engine.cpp
 )
 target_include_directories(calib_utils
   PUBLIC
@@ -183,7 +186,27 @@ if(APPLE)
 endif()
 
 # ── Install ───────────────────────────────────────────────────────────────────
-install(TARGETS calib_utils lidar_processor_cpp camera_detector_cpp
+# ── fusion_node_cpp ───────────────────────────────────────────────────────────
+add_executable(fusion_node_cpp
+  src/fusion_node.cpp
+)
+target_include_directories(fusion_node_cpp PRIVATE include)
+target_link_libraries(fusion_node_cpp
+  calib_utils
+  $<$<PLATFORM_ID:Darwin>:${_python_lib}>
+)
+ament_target_dependencies(fusion_node_cpp
+  rclcpp
+  sensor_msgs
+  vision_msgs
+  geometry_msgs
+  message_filters
+)
+if(APPLE)
+  add_dependencies(fusion_node_cpp _atomic_stub)
+endif()
+
+install(TARGETS calib_utils lidar_processor_cpp camera_detector_cpp fusion_node_cpp
   DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY include/
@@ -210,6 +233,9 @@ if(BUILD_TESTING)
   target_link_libraries(test_projector calib_utils)
   target_compile_definitions(test_projector PRIVATE
     CALIBRATION_YAML_PATH="${_calib_yaml}")
+
+  ament_add_gtest(test_fusion_engine test/test_fusion_engine.cpp)
+  target_link_libraries(test_fusion_engine calib_utils)
 endif()
 
 ament_package()
