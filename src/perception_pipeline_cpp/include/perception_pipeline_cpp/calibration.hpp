@@ -13,8 +13,8 @@
  *   lidar_to_camera.T → 4×4 extrinsic Velodyne→rectified-camera (row-major, 16 floats)
  */
 
-#include <array>
 #include <string>
+#include <Eigen/Dense>
 
 namespace perception_pipeline_cpp {
 
@@ -23,11 +23,11 @@ struct CalibrationData {
     float fx{0.f}, fy{0.f}, cx{0.f}, cy{0.f};
     int   width{0}, height{0};
 
-    // 3×4 projection matrix P2 (row-major): projects rectified-camera points to pixels
-    std::array<float, 12> P{};
+    // 3×4 projection matrix P2: projects rectified-camera points to pixels
+    Eigen::Matrix<float, 3, 4> P = Eigen::Matrix<float, 3, 4>::Zero();
 
-    // 4×4 extrinsic T (row-major): Velodyne frame → rectified camera frame
-    std::array<float, 16> T{};
+    // 4×4 extrinsic T: Velodyne frame → rectified camera frame
+    Eigen::Matrix4f T = Eigen::Matrix4f::Zero();
 };
 
 class Calibration {

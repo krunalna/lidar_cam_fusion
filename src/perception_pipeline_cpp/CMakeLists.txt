@@ -33,6 +33,9 @@ find_package(vision_msgs REQUIRED)
 # ── PCL ───────────────────────────────────────────────────────────────────────
 find_package(PCL REQUIRED COMPONENTS common filters segmentation)
 
+# ── Eigen3 ────────────────────────────────────────────────────────────────────
+find_package(Eigen3 REQUIRED)
+
 # ── OpenCV ────────────────────────────────────────────────────────────────────
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 
@@ -126,6 +129,7 @@ target_include_directories(calib_utils
     ${OpenCV_INCLUDE_DIRS}
 )
 target_link_libraries(calib_utils
+  Eigen3::Eigen
   ${OpenCV_LIBS}
 )
 

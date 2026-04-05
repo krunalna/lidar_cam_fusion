@@ -40,13 +40,11 @@ static perception_pipeline_cpp::CalibrationData make_kitti_cal()
     cal.cx = 609.5593f; cal.cy = 172.8540f;
     cal.width = 1242;   cal.height = 375;
 
-    // 4×4 extrinsic T (row-major) from calibration.yaml
-    cal.T = {{
-         7.533745e-03f, -9.999714e-01f, -6.166020e-04f, -4.069766e-03f,
-         1.480249e-02f,  7.280733e-04f, -9.998902e-01f, -7.631618e-02f,
-         9.998621e-01f,  7.523790e-03f,  1.480755e-02f, -2.717806e-01f,
-         0.0f,           0.0f,           0.0f,            1.0f
-    }};
+    // 4×4 extrinsic T from calibration.yaml (Eigen comma initializer, row-major order)
+    cal.T << 7.533745e-03f, -9.999714e-01f, -6.166020e-04f, -4.069766e-03f,
+             1.480249e-02f,  7.280733e-04f, -9.998902e-01f, -7.631618e-02f,
+             9.998621e-01f,  7.523790e-03f,  1.480755e-02f, -2.717806e-01f,
+             0.0f,           0.0f,           0.0f,            1.0f;
     return cal;
 }
 
@@ -78,19 +76,18 @@ TEST(CalibrationTest, ExtrinsicHas16Elements)
     perception_pipeline_cpp::Calibration cal(kCalibPath);
     const auto & T = cal.data().T;
     // Last row must be [0, 0, 0, 1] for a valid homogeneous transform
-    EXPECT_NEAR(T[12], 0.f, 1e-6f);
-    EXPECT_NEAR(T[13], 0.f, 1e-6f);
-    EXPECT_NEAR(T[14], 0.f, 1e-6f);
-    EXPECT_NEAR(T[15], 1.f, 1e-6f);
+    EXPECT_NEAR(T(3, 0), 0.f, 1e-6f);
+    EXPECT_NEAR(T(3, 1), 0.f, 1e-6f);
+    EXPECT_NEAR(T(3, 2), 0.f, 1e-6f);
+    EXPECT_NEAR(T(3, 3), 1.f, 1e-6f);
 }
 
 TEST(CalibrationTest, ProjectionMatrixHas12Elements)
 {
     perception_pipeline_cpp::Calibration cal(kCalibPath);
     const auto & P = cal.data().P;
-    // P is 3×4 row-major: P[row*4 + col]
-    // P[2*4+2] = P[10] is the (row2, col2) element — must be 1 for a valid projection matrix
-    EXPECT_NEAR(P[10], 1.f, 1e-6f);
+    // P(2,2) is the (row2, col2) element — must be 1 for a valid projection matrix
+    EXPECT_NEAR(P(2, 2), 1.f, 1e-6f);
 }
 
 TEST(CalibrationTest, MissingFileThrows)

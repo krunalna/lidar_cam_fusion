@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include <Eigen/Dense>
 #include <opencv2/core.hpp>
 
 namespace perception_pipeline_cpp {
@@ -65,7 +66,8 @@ Calibration::Calibration(const std::string & yaml_path)
             "Calibration: camera.P must have 12 elements, got "
             + std::to_string(P_vec.size()));
     }
-    std::copy(P_vec.begin(), P_vec.end(), data_.P.begin());
+    // Map the flat row-major vector into the Eigen matrix
+    data_.P = Eigen::Map<Eigen::Matrix<float, 3, 4, Eigen::RowMajor>>(P_vec.data());
 
     // ── 4×4 extrinsic T (Velodyne → rectified camera) ────────────────────────
     cv::FileNode lidar_cam = fs["lidar_to_camera"];
@@ -81,7 +83,8 @@ Calibration::Calibration(const std::string & yaml_path)
             "Calibration: lidar_to_camera.T must have 16 elements, got "
             + std::to_string(T_vec.size()));
     }
-    std::copy(T_vec.begin(), T_vec.end(), data_.T.begin());
+    // Map the flat row-major vector into the Eigen matrix
+    data_.T = Eigen::Map<Eigen::Matrix<float, 4, 4, Eigen::RowMajor>>(T_vec.data());
 
     fs.release();
 }

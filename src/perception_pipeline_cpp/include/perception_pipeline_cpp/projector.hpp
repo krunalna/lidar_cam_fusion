@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <Eigen/Dense>
 #include "perception_pipeline_cpp/calibration.hpp"
 
 namespace perception_pipeline_cpp {
@@ -70,9 +71,8 @@ public:
         float x1, float y1, float x2, float y2) const;
 
 private:
-    // Precomputed from CalibrationData
-    std::array<float, 9>  K_;      // 3×3 intrinsic, row-major
-    std::array<float, 16> T_;      // 4×4 extrinsic, row-major
+    Eigen::Matrix3f K_;     // 3×3 camera intrinsic
+    Eigen::Matrix4f T_;     // 4×4 Velodyne→camera extrinsic
     int width_{0}, height_{0};
 };
 
