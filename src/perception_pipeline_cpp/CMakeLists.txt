@@ -31,6 +31,7 @@ find_package(std_msgs REQUIRED)
 find_package(vision_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(message_filters REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 # ── PCL ───────────────────────────────────────────────────────────────────────
 find_package(PCL REQUIRED COMPONENTS common filters segmentation)
@@ -190,9 +191,12 @@ endif()
 add_executable(fusion_node_cpp
   src/fusion_node.cpp
 )
-target_include_directories(fusion_node_cpp PRIVATE include)
+target_include_directories(fusion_node_cpp
+  PRIVATE include ${OpenCV_INCLUDE_DIRS}
+)
 target_link_libraries(fusion_node_cpp
   calib_utils
+  ${OpenCV_LIBS}
   $<$<PLATFORM_ID:Darwin>:${_python_lib}>
 )
 ament_target_dependencies(fusion_node_cpp
@@ -201,6 +205,7 @@ ament_target_dependencies(fusion_node_cpp
   vision_msgs
   geometry_msgs
   message_filters
+  visualization_msgs
 )
 if(APPLE)
   add_dependencies(fusion_node_cpp _atomic_stub)
