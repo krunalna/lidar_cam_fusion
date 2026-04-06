@@ -11,6 +11,7 @@ add_compile_options(-Wall -Wextra -Wpedantic)
 
 # Conda prefix so find_package can locate OpenCV, ONNX Runtime, PCL, etc.
 list(APPEND CMAKE_PREFIX_PATH "$ENV{CONDA_PREFIX}")
+set(CONDA_LIB_DIR "$ENV{CONDA_PREFIX}/lib")
 
 # ── numpy _core/include workaround ────────────────────────────────────────────
 # rclcpp's cmake config lists numpy's _core/include in INTERFACE_INCLUDE_DIRECTORIES.
@@ -37,11 +38,11 @@ find_package(PCL REQUIRED COMPONENTS common filters segmentation)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 
 # ── ONNX Runtime ─────────────────────────────────────────────────────────────
-# The conda-forge 'onnxruntime' package for macOS is Python-only — it ships the
-# .dylib inside site-packages but no C++ headers.  We therefore:
-#   1. Locate the .dylib and version via the Python package (already installed).
-#   2. Download the matching official prebuilt (headers + rpath symlink) from
-#      GitHub Releases using FetchContent — downloaded once, cached in the build dir.
+# The conda-forge 'onnxruntime' package ships the runtime library through the
+# Python package, but not the C++ headers we need for compilation. We therefore:
+#   1. Locate the runtime shared library and version via the Python package.
+#   2. Download the matching official prebuilt archive for headers using
+#      FetchContent (one-time, cached in the build dir).
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
@@ -54,30 +55,47 @@ execute_process(
   RESULT_VARIABLE _ort_ver_rc
 )
 
-# Step 2 — dylib path
+# Step 2 — shared library path
 execute_process(
   COMMAND "${Python3_EXECUTABLE}" -c
     "import onnxruntime, os, glob; \
      capi = os.path.join(os.path.dirname(onnxruntime.__file__), 'capi'); \
-     libs = glob.glob(os.path.join(capi, 'libonnxruntime*.dylib')); \
+     patterns = ['libonnxruntime*.dylib', 'libonnxruntime.so*']; \
+     libs = []; \
+     [libs.extend(glob.glob(os.path.join(capi, pattern))) for pattern in patterns]; \
+     libs = [p for p in sorted(libs) if 'providers' not in os.path.basename(p)]; \
      print(libs[0] if libs else '')"
-  OUTPUT_VARIABLE ORT_DYLIB
+  OUTPUT_VARIABLE ORT_SHARED_LIB
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-if(_ort_ver_rc OR NOT ORT_VERSION OR NOT EXISTS "${ORT_DYLIB}")
+if(APPLE)
+  set(ORT_PREBUILT_ARCHIVE "onnxruntime-osx-arm64-${ORT_VERSION}.tgz")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+  set(ORT_PREBUILT_ARCHIVE "onnxruntime-linux-x64-${ORT_VERSION}.tgz")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+  set(ORT_PREBUILT_ARCHIVE "onnxruntime-linux-aarch64-${ORT_VERSION}.tgz")
+else()
+  message(FATAL_ERROR
+    "Unsupported platform for automatic ONNX Runtime header download: "
+    "${CMAKE_SYSTEM_NAME} / ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
+if(_ort_ver_rc OR NOT ORT_VERSION OR NOT EXISTS "${ORT_SHARED_LIB}")
   message(FATAL_ERROR
     "ONNX Runtime Python package not found in the pixi environment.\n"
     "Run: pixi install")
 endif()
-message(STATUS "ONNX Runtime: version=${ORT_VERSION}  dylib=${ORT_DYLIB}")
+get_filename_component(ORT_SHARED_LIB_DIR "${ORT_SHARED_LIB}" DIRECTORY)
+get_filename_component(ORT_SHARED_LIB_NAME "${ORT_SHARED_LIB}" NAME)
+message(STATUS "ONNX Runtime: version=${ORT_VERSION}  shared_lib=${ORT_SHARED_LIB}")
 
 # Step 3 — download matching headers via FetchContent (one-time, CMake-cached)
 include(FetchContent)
 # CMP0169: allow calling FetchContent_Populate directly for non-cmake archives
 cmake_policy(SET CMP0169 OLD)
 FetchContent_Declare(ort_prebuilt
-  URL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-arm64-${ORT_VERSION}.tgz"
+  URL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/${ORT_PREBUILT_ARCHIVE}"
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_GetProperties(ort_prebuilt)
@@ -89,7 +107,7 @@ endif()
 # Step 4 — create import target
 add_library(onnxruntime::onnxruntime SHARED IMPORTED GLOBAL)
 set_target_properties(onnxruntime::onnxruntime PROPERTIES
-  IMPORTED_LOCATION             "${ORT_DYLIB}"
+  IMPORTED_LOCATION             "${ORT_SHARED_LIB}"
   INTERFACE_INCLUDE_DIRECTORIES "${ort_prebuilt_SOURCE_DIR}/include")
 message(STATUS "ONNX Runtime headers: ${ort_prebuilt_SOURCE_DIR}/include")
 
@@ -125,6 +143,7 @@ target_include_directories(lidar_processor_cpp
     include
     ${PCL_INCLUDE_DIRS}
 )
+target_link_directories(lidar_processor_cpp PRIVATE "${CONDA_LIB_DIR}")
 target_compile_definitions(lidar_processor_cpp PRIVATE ${PCL_DEFINITIONS})
 target_link_libraries(lidar_processor_cpp
   ${PCL_LIBRARIES}
@@ -149,11 +168,30 @@ target_include_directories(camera_detector_cpp
     include
     ${OpenCV_INCLUDE_DIRS}
 )
+target_link_directories(camera_detector_cpp PRIVATE "${CONDA_LIB_DIR}")
 target_link_libraries(camera_detector_cpp
   onnxruntime::onnxruntime
   ${OpenCV_LIBS}
   $<$<PLATFORM_ID:Darwin>:${_python_lib}>
 )
+set_target_properties(camera_detector_cpp PROPERTIES
+  BUILD_RPATH "$ORIGIN;${ORT_SHARED_LIB_DIR}"
+  INSTALL_RPATH "$ORIGIN;${ORT_SHARED_LIB_DIR}"
+)
+if(UNIX AND NOT APPLE)
+  add_custom_command(TARGET camera_detector_cpp POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E create_symlink
+            "${ORT_SHARED_LIB}"
+            "$<TARGET_FILE_DIR:camera_detector_cpp>/${ORT_SHARED_LIB_NAME}"
+    COMMAND "${CMAKE_COMMAND}" -E create_symlink
+            "${ORT_SHARED_LIB_NAME}"
+            "$<TARGET_FILE_DIR:camera_detector_cpp>/libonnxruntime.so.1"
+    COMMAND "${CMAKE_COMMAND}" -E create_symlink
+            "${ORT_SHARED_LIB_DIR}/libonnxruntime_providers_shared.so"
+            "$<TARGET_FILE_DIR:camera_detector_cpp>/libonnxruntime_providers_shared.so"
+    VERBATIM
+  )
+endif()
 ament_target_dependencies(camera_detector_cpp
   rclcpp
   sensor_msgs
@@ -168,6 +206,19 @@ endif()
 install(TARGETS lidar_processor_cpp camera_detector_cpp
   DESTINATION lib/${PROJECT_NAME}
 )
+if(UNIX AND NOT APPLE)
+  install(FILES
+    "${ORT_SHARED_LIB}"
+    "${ORT_SHARED_LIB_DIR}/libonnxruntime_providers_shared.so"
+    DESTINATION lib/${PROJECT_NAME}
+  )
+  install(CODE
+    "execute_process(
+      COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
+              \"${ORT_SHARED_LIB_NAME}\"
+              \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/lib/${PROJECT_NAME}/libonnxruntime.so.1\")"
+  )
+endif()
 install(DIRECTORY include/
   DESTINATION include
 )

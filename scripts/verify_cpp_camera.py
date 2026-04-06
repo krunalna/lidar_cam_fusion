@@ -119,9 +119,9 @@ cpp_proc = None
 rclpy.init()
 try:
     qos_sub = QoSProfile(
-        reliability=ReliabilityPolicy.BEST_EFFORT,
+        reliability=ReliabilityPolicy.RELIABLE,
         history=HistoryPolicy.KEEP_LAST,
-        depth=1,
+        depth=5,
     )
     qos_pub = QoSProfile(
         reliability=ReliabilityPolicy.RELIABLE,

@@ -74,9 +74,9 @@ except ImportError as e:
 
 try:
     import cv2
-    check("opencv-python", True, cv2.__version__)
+    check("cv2 (OpenCV)", True, cv2.__version__)
 except ImportError as e:
-    check("opencv-python", False, str(e))
+    check("cv2 (OpenCV)", False, str(e))
 
 try:
     import open3d as o3d
