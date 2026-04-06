@@ -9,11 +9,12 @@ platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 [feature.base.dependencies]
 colcon-common-extensions = "*"
 numpy = ">=1.24,<2.0"
+pillow = "*"
+py-opencv = ">=4.7"
 pyyaml = "*"
 scipy = "*"
 
 [feature.base.pypi-dependencies]
-opencv-python = ">=4.7"
 ultralytics = ">=8.0"
 onnx = ">=1.12.0,<2.0.0"
 onnxslim = ">=0.1.71"
@@ -22,7 +23,7 @@ onnxslim = ">=0.1.71"
 build    = "colcon build --symlink-install --packages-select perception_pipeline"
 launch   = "ros2 launch perception_pipeline fusion_pipeline.launch.py"
 play-bag = "ros2 bag play $BAG_PATH --loop"
-foxglove  = "ros2 launch foxglove_bridge foxglove_bridge_launch.xml send_buffer_limit:=524288000"
+foxglove  = "python scripts/run_foxglove.py"
 verify-env       = "python scripts/verify_env.py"
 verify-publisher = "python scripts/verify_publisher.py"
 verify3       = "python scripts/verify_step3.py"

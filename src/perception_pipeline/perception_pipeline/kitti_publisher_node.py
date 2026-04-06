@@ -23,12 +23,12 @@ Usage:
 from datetime import datetime, timezone
 from pathlib import Path
 
-import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from rclpy.time import Time
+from PIL import Image as PILImage
 from sensor_msgs.msg import Image, PointCloud2, PointField
 from std_msgs.msg import Header
 
@@ -73,12 +73,10 @@ def _bin_to_pointcloud2(bin_path: Path, header: Header) -> PointCloud2:
 def _png_to_image(png_path: Path, header: Header) -> Image:
     """Convert a PNG file to a sensor_msgs/Image message (rgb8 encoding).
 
-    Does not require cv_bridge — converts directly via numpy.
+    Does not require cv_bridge — converts directly via Pillow + numpy.
     """
-    bgr = cv2.imread(str(png_path))
-    if bgr is None:
-        raise FileNotFoundError(f"Could not read image: {png_path}")
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    with PILImage.open(png_path) as image:
+        rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
 
     msg = Image()
     msg.header = header

@@ -54,13 +54,16 @@ Uses **Pixi** (Python 3.12 + ROS 2 Jazzy via conda). Prefix all commands with `p
 curl -fsSL https://pixi.sh/install.sh | bash
 # Restart terminal or: source ~/.bashrc
 
-# 2. Enter the Pixi environment
+# 2. Install the environment
+pixi install
+
+# 3. Enter the Pixi environment
 pixi shell
 
-# 3. Build the ROS 2 workspace
+# 4. Build the ROS 2 workspace
 pixi run build
 
-# 4. Activate ROS + colcon overlay
+# 5. Activate ROS + colcon overlay
 . scripts/activate_ros.sh
 ```
 
@@ -72,8 +75,8 @@ pixi run build
 
 ```bash
 pixi run build                            # colcon build --symlink-install
-pixi run verify1                          # check Python 3.12+, ROS 2 Jazzy, all deps
-pixi run verify2                          # KITTI publisher: imports, conversion, ROS dry-run
+pixi run verify-env                       # check Python 3.12+, ROS 2 Jazzy, all deps
+pixi run verify-publisher                # KITTI publisher: imports, conversion, ROS dry-run
 pixi run verify3                          # LiDAR processor: preprocessing stages, ROS dry-run
 pixi run verify_camera_detector           # camera detector: YOLOv8 inference dry-run
 
@@ -82,6 +85,7 @@ pixi run download-kitti -- --list
 pixi run download-kitti -- --sequence 0005
 
 pixi run play-bag                         # requires BAG_PATH env var
+pixi run foxglove                         # Foxglove bridge on FOXGLOVE_PORT (default 8765)
 ```
 
 ### C++ pipeline

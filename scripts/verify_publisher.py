@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+from PIL import Image as PILImage
 
 WORKSPACE_ROOT = Path(__file__).parent.parent
 PASS = "\033[92m  PASS\033[0m"
@@ -104,15 +105,12 @@ with tempfile.TemporaryDirectory() as tmpdir:
     check("Round-trip x coordinate", abs(x - 1.0) < 1e-6, f"{x:.4f}")
     check("Round-trip intensity",    abs(i - 0.5) < 1e-6, f"{i:.4f}")
 
-# ── _png_to_image ─────────────────────────────────────────────────────────────
-import cv2
-
 with tempfile.TemporaryDirectory() as tmpdir:
-    # Write a synthetic 10×20 BGR image
-    fake_bgr = np.zeros((10, 20, 3), dtype=np.uint8)
-    fake_bgr[:, :, 2] = 200   # red channel (BGR → R=200 in BGR = R channel)
+    # Write a synthetic 10×20 RGB image
+    fake_rgb = np.zeros((10, 20, 3), dtype=np.uint8)
+    fake_rgb[:, :, 0] = 200
     png_path = Path(tmpdir) / "test.png"
-    cv2.imwrite(str(png_path), fake_bgr)
+    PILImage.fromarray(fake_rgb, mode="RGB").save(png_path)
 
     hdr = Header()
     hdr.frame_id = "camera_left"
@@ -124,9 +122,9 @@ with tempfile.TemporaryDirectory() as tmpdir:
     check("Image step == 60 bytes",   img_msg.step == 60,      str(img_msg.step))
     check("Image data length correct", len(img_msg.data) == 10 * 20 * 3)
 
-    # Verify BGR→RGB flip: original R=200 in BGR is index [2]; after flip it is [0]
+    # Verify the stored RGB data survives the round-trip
     pixel_r = img_msg.data[0]  # first pixel, R channel in rgb8
-    check("BGR→RGB conversion correct", pixel_r == 200, f"R={pixel_r}")
+    check("RGB conversion correct", pixel_r == 200, f"R={pixel_r}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # C. KITTI data directory check (optional — set KITTI_SEQ to run)
@@ -177,8 +175,10 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
     for i in range(3):
         # 640×480 image
-        cv2.imwrite(str(img_dir / f"{i:010d}.png"),
-                    np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8))
+        PILImage.fromarray(
+            np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8),
+            mode="RGB",
+        ).save(img_dir / f"{i:010d}.png")
         # 100-point cloud
         pts = np.random.rand(100, 4).astype(np.float32)
         pts.tofile(lid_dir / f"{i:010d}.bin")

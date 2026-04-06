@@ -113,6 +113,7 @@ The values are derived from KITTI's `calib_cam_to_cam.txt` and `calib_velo_to_ca
 | `pixi run build` | `colcon build --symlink-install` for `perception_pipeline` |
 | `pixi run launch` | `ros2 launch perception_pipeline fusion_pipeline.launch.py` |
 | `pixi run play-bag` | `ros2 bag play $BAG_PATH --loop` |
+| `pixi run foxglove` | Launch Foxglove bridge on `FOXGLOVE_PORT` (default `8765`) |
 | `pixi run download-kitti` | Download default KITTI sequence |
 | `pixi run verify-env` | Check environment, ROS 2, and workspace scaffold |
 | `pixi run verify-publisher` | Unit-test the KITTI publisher node |
@@ -135,16 +136,30 @@ python scripts/download_kitti.py --force
 
 Data is saved to `data/kitti/<date>/<date>_drive_<seq>_sync/` and is gitignored.
 
+## Foxglove
+
+Run the bridge with:
+
+```bash
+pixi run foxglove
+```
+
+If port `8765` is already in use, override it:
+
+```bash
+FOXGLOVE_PORT=8766 pixi run foxglove
+```
+
 ## Verification Scripts
 
-**`pixi run verify1`** — Run after `pixi install`. Checks:
+**`pixi run verify-env`** — Run after `pixi install`. Checks:
 - Python ≥ 3.12 and ROS 2 Jazzy are active
 - All required ROS message packages are importable
 - ML/vision stack (NumPy, OpenCV, Open3D, YOLOv8, SciPy) is installed
 - Workspace scaffold (launch files, config, scripts) is complete
 - `calibration.yaml` has required sections
 
-**`pixi run verify2`** — Run after `pixi run build`. Checks:
+**`pixi run verify-publisher`** — Run after `pixi run build`. Checks:
 - `kitti_publisher_node.py` exists and entry point is registered
 - `_bin_to_pointcloud2` and `_png_to_image` conversion utilities are correct
 - Node instantiation and frame publishing work without a live ROS daemon
@@ -165,7 +180,7 @@ Both publishers use **BEST_EFFORT** QoS with history depth 5, matching real sens
 |---------|---------|---------|
 | ROS 2 Jazzy | — | Middleware, message types, colcon build |
 | Python | 3.12 | Runtime |
-| OpenCV | ≥ 4.7 | Image I/O and color conversion |
+| OpenCV / cv2 | ≥ 4.7 | Image I/O and detector visualization |
 | Open3D | ≥ 0.17 | 3D point cloud processing (future nodes) |
 | ultralytics | ≥ 8.0 | YOLOv8 object detection (future nodes) |
 | NumPy | ≥ 1.24, < 2.0 | Array operations |
