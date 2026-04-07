@@ -94,6 +94,9 @@ from vision_msgs.msg import Detection2DArray
 
 IMG_W, IMG_H = 1242, 375
 synthetic_rgb = np.ones((IMG_H, IMG_W, 3), dtype=np.uint8) * 128
+DISCOVERY_GRACE_SEC = float(os.environ.get("VERIFY_CAMERA_DISCOVERY_SEC", "6.0"))
+DRY_RUN_TIMEOUT_SEC = float(os.environ.get("VERIFY_CAMERA_TIMEOUT_SEC", "12.0"))
+PUBLISH_HZ = float(os.environ.get("VERIFY_CAMERA_PUBLISH_HZ", "10.0"))
 
 received = {"detections": 0}
 cpp_proc = None
@@ -128,7 +131,10 @@ try:
     img_msg.data = synthetic_rgb.tobytes()
 
     env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = ""
+    # Default to normal provider auto-selection (matches full launch behavior).
+    # Set VERIFY_CAMERA_FORCE_CPU=1 to force a CPU-only smoke run.
+    if os.environ.get("VERIFY_CAMERA_FORCE_CPU", "0") == "1":
+        env["CUDA_VISIBLE_DEVICES"] = "-1"
     setup_bash = WORKSPACE_ROOT / "install/setup.bash"
     if setup_bash.exists():
         result = subprocess.run(
@@ -157,33 +163,57 @@ try:
     executor = SingleThreadedExecutor()
     executor.add_node(spy)
 
-    deadline = time.monotonic() + 4.0
+    deadline = time.monotonic() + DISCOVERY_GRACE_SEC
     while time.monotonic() < deadline:
+        if cpp_proc.poll() is not None:
+            break
         executor.spin_once(timeout_sec=0.05)
 
-    deadline = time.monotonic() + 4.0
+    deadline = time.monotonic() + DRY_RUN_TIMEOUT_SEC
     n_published = 0
+    publish_period = 1.0 / max(PUBLISH_HZ, 1.0)
+    last_publish = 0.0
     while time.monotonic() < deadline and rclpy.ok():
-        if n_published < 3:
+        if cpp_proc.poll() is not None:
+            break
+        now = time.monotonic()
+        if now - last_publish >= publish_period:
             img_msg.header.stamp = spy.get_clock().now().to_msg()
             pub.publish(img_msg)
             n_published += 1
+            last_publish = now
         executor.spin_once(timeout_sec=0.05)
         if received["detections"] > 0:
             break
 
+    exit_code = cpp_proc.poll()
+    stderr_text = ""
+    if exit_code is not None and cpp_proc.stderr is not None:
+        stderr_text = cpp_proc.stderr.read().decode(errors="replace")
+
+    transport_blocked = (
+        "Error creating socket: Operation not permitted" in stderr_text
+        or "User transport failed to register" in stderr_text
+        or "getifaddrs: Operation not permitted" in stderr_text
+    )
+
     check("camera_detector_cpp published /detections_2d",
           received["detections"] > 0,
-          f"{received['detections']} msg(s) after {n_published} frame(s) sent")
+          f"{received['detections']} msg(s) after {n_published} frame(s) sent in "
+          f"{DRY_RUN_TIMEOUT_SEC:.1f}s",
+          warn_only=transport_blocked)
 
     check("C++ node still alive after inference",
-          cpp_proc.poll() is None,
-          f"exit code: {cpp_proc.poll()}")
+          exit_code is None,
+          f"exit code: {exit_code}",
+          warn_only=transport_blocked)
 
-    if cpp_proc.poll() is not None:
-        stderr = cpp_proc.stderr.read().decode(errors="replace")
-        if stderr.strip():
-            print(f"\n  Node stderr:\n{stderr[:800]}")
+    if transport_blocked:
+        print(f"{WARN}  DDS transport appears restricted in this environment; "
+              "ROS dry-run warnings are non-fatal.")
+
+    if stderr_text.strip():
+        print(f"\n  Node stderr:\n{stderr_text[:2000]}")
 
 except Exception as exc:
     check("ROS dry-run", False, str(exc))

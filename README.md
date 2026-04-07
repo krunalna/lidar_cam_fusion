@@ -76,8 +76,14 @@ pixi run verify-projections
 pixi run verify-fusion
 
 # 6. Launch the full pipeline
-KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync \
-YOLO_ONNX=$(pwd)/models/yolov8n.onnx \
+pixi run launch
+
+# Optional explicit overrides (launch arguments)
+pixi run launch --sequence_path:=/abs/path/to/2011_09_26_drive_0001_sync --model_path:=/abs/path/to/yolov8n.onnx
+
+# Optional explicit overrides (environment variables)
+KITTI_SEQ=/abs/path/to/2011_09_26_drive_0001_sync \
+YOLO_ONNX=/abs/path/to/yolov8n.onnx \
 pixi run launch
 ```
 
@@ -92,7 +98,7 @@ pixi run launch
 | `pixi run verify-env` | Validate workspace/tooling dependencies |
 | `pixi run verify-publisher` | Dry-run the KITTI publisher |
 | `pixi run verify-lidar` | Dry-run `lidar_processor_cpp` |
-| `pixi run verify-camera` | Dry-run `camera_detector_cpp` |
+| `pixi run verify-camera` | Dry-run `camera_detector_cpp` (smoke test with configurable timing) |
 | `pixi run verify-projections` | Check calibration/projection math and tests |
 | `pixi run verify-fusion` | Check fusion binary, tests, and node startup |
 | `pixi run play-bag` | Play a ROS bag if `BAG_PATH` is set |
@@ -101,6 +107,12 @@ pixi run launch
 ## Configuration
 
 The canonical calibration file lives at `src/perception_pipeline_cpp/config/calibration.yaml`.
+
+`pixi run launch` defaults:
+- `sequence_path` auto-resolves to `$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync` when present.
+- `model_path` auto-resolves to `$(pwd)/models/yolov8n.onnx` when present.
+- Override via launch args: `--sequence_path:=... --model_path:=...`.
+- Override via env vars: `KITTI_SEQ=... YOLO_ONNX=... pixi run launch`.
 
 It contains:
 
@@ -159,6 +171,10 @@ lidar_cam_fusion/
 - `verify-publisher` imports the publisher source directly from `src/perception_pipeline_cpp/scripts/kitti_publisher.py`.
 - `verify-lidar` and `verify-camera` exercise the built binaries from `install/perception_pipeline_cpp/lib/perception_pipeline_cpp/`.
 - `verify-projections` and `verify-fusion` run `colcon test --packages-select perception_pipeline_cpp`.
+- `verify-camera` defaults to normal provider auto-selection to match full launch behavior.
+- Use `VERIFY_CAMERA_FORCE_CPU=1 pixi run verify-camera` to force CPU-only smoke mode when debugging machine-specific GPU startup issues.
+- `verify-camera` timing can be tuned via `VERIFY_CAMERA_DISCOVERY_SEC`, `VERIFY_CAMERA_TIMEOUT_SEC`, and `VERIFY_CAMERA_PUBLISH_HZ`.
+- In restricted environments (for example, DDS socket creation blocked), `verify-camera` downgrades ROS dry-run runtime failures to warnings and still reports static/build checks.
 
 ## Current Follow-up Work
 

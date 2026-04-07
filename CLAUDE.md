@@ -40,8 +40,14 @@ pixi run verify-camera
 pixi run verify-projections
 pixi run verify-fusion
 
-KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync \
-YOLO_ONNX=$(pwd)/models/yolov8n.onnx \
+pixi run launch
+
+# Optional explicit overrides (launch arguments)
+pixi run launch --sequence_path:=/abs/path/to/2011_09_26_drive_0001_sync --model_path:=/abs/path/to/yolov8n.onnx
+
+# Optional explicit overrides (environment variables)
+KITTI_SEQ=/abs/path/to/2011_09_26_drive_0001_sync \
+YOLO_ONNX=/abs/path/to/yolov8n.onnx \
 pixi run launch
 ```
 
@@ -60,11 +66,17 @@ The supported full-pipeline launch file is:
 
 Environment variables used by launch:
 
-- `KITTI_SEQ`
+- `KITTI_SEQ` (optional override)
 - `FRAME_RATE`
 - `LOOP`
-- `YOLO_ONNX`
+- `YOLO_ONNX` (optional override)
 - `CALIB_FILE` (optional override)
+
+Default launch path behavior when overrides are not set:
+
+- `sequence_path` uses `$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync` if it exists.
+- `model_path` uses `$(pwd)/models/yolov8n.onnx` if it exists.
+- Overrides can be passed as launch args (`--sequence_path:=... --model_path:=...`) or env vars (`KITTI_SEQ=... YOLO_ONNX=...`).
 
 ## Key Files
 
@@ -116,6 +128,13 @@ Additional debug outputs:
 Shared PointCloud2 helpers for verification live in:
 
 - `scripts/pc2_helpers.py`
+
+`verify-camera` specifics:
+
+- Default behavior uses normal provider auto-selection, matching full launch behavior.
+- Set `VERIFY_CAMERA_FORCE_CPU=1` to force CPU-only smoke mode when debugging machine-specific GPU startup failures.
+- Timing knobs are available via `VERIFY_CAMERA_DISCOVERY_SEC`, `VERIFY_CAMERA_TIMEOUT_SEC`, and `VERIFY_CAMERA_PUBLISH_HZ`.
+- If DDS transport is restricted (socket/interface permissions), ROS dry-run runtime checks are reported as warnings instead of hard failures.
 
 ## Build / Packaging Notes
 
