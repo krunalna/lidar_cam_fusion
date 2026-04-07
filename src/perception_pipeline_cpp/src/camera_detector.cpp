@@ -22,8 +22,16 @@ struct CameraDetector::OrtImpl {
 
     explicit OrtImpl(const std::string & model_path)
     {
+        // Prefer CUDA; fall back to CPU if the provider is unavailable.
+        try {
+            OrtCUDAProviderOptions cuda_opts{};
+            cuda_opts.device_id = 0;
+            opts.AppendExecutionProvider_CUDA(cuda_opts);
+        } catch (const Ort::Exception &) {
+            // CUDA provider not available — running on CPU.
+        }
         opts.SetIntraOpNumThreads(1);
-        opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+        opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
         session = std::make_unique<Ort::Session>(env, model_path.c_str(), opts);
 
         // Query actual I/O names from the loaded model

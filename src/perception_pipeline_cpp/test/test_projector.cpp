@@ -5,12 +5,12 @@
  *
  * Reference values computed from calibration.yaml via numpy:
  *
- *   K = [[721.5377, 0, 609.5593], [0, 721.5377, 172.854], [0, 0, 1]]
+ *   P = reshape(calibration.yaml camera.P, 3, 4)
  *   T = reshape(calibration.yaml lidar_to_camera.T, 4, 4)
  *
  *   P_velo = [10, 0, 0, 1]^T
  *   P_cam  = T @ P_velo  →  [Xc, Yc, Zc]
- *   p      = K @ P_cam[:3]
+ *   p      = P @ P_cam
  *   u, v   = p[0]/p[2], p[1]/p[2]
  *
  * Run with:
@@ -39,6 +39,9 @@ static perception_pipeline_cpp::CalibrationData make_kitti_cal()
     cal.fx = 721.5377f; cal.fy = 721.5377f;
     cal.cx = 609.5593f; cal.cy = 172.8540f;
     cal.width = 1242;   cal.height = 375;
+    cal.P << 721.5377f, 0.0f,      609.5593f, 44.85728f,
+             0.0f,      721.5377f, 172.8540f, 0.2163791f,
+             0.0f,      0.0f,      1.0f,      0.002745884f;
 
     // 4×4 extrinsic T from calibration.yaml (Eigen comma initializer, row-major order)
     cal.T << 7.533745e-03f, -9.999714e-01f, -6.166020e-04f, -4.069766e-03f,
@@ -117,20 +120,18 @@ TEST(ProjectorTest, PointAheadProjectsIntoImage)
 
 TEST(ProjectorTest, PointAheadMatchesPythonReference)
 {
-    // Hand-computed reference for P_velo = [10, 0, 0]:
-    //   Xc = T[0]*10 + T[3]  = 7.533745e-3*10 - 4.069766e-3 = 0.07127
-    //   Yc = T[4]*10 + T[7]  = 1.480249e-2*10 - 7.631618e-2 = 0.07171
-    //   Zc = T[8]*10 + T[11] = 9.998621e-1*10 - 2.717806e-1 = 9.72684
-    //   u  = fx*(Xc/Zc) + cx = 721.5377*(0.07127/9.72684) + 609.5593 ≈ 614.85
-    //   v  = fy*(Yc/Zc) + cy = 721.5377*(0.07171/9.72684) + 172.854  ≈ 178.17
+    // Hand-computed KITTI P2 reference for P_velo = [10, 0, 0]:
+    //   P_cam = T @ P_velo
+    //   p     = P2 @ P_cam
+    //   u,v   = p[:2] / p[2] ≈ (619.28, 178.15)
     const auto cal = make_kitti_cal();
     perception_pipeline_cpp::Projector proj(cal);
 
     const auto px = proj.project(10.0f, 0.0f, 0.0f);
 
     EXPECT_TRUE(px.valid);
-    EXPECT_NEAR(px.u, 614.85f, 1.0f);   // 1-pixel tolerance
-    EXPECT_NEAR(px.v, 178.17f, 1.0f);
+    EXPECT_NEAR(px.u, 619.28f, 1.0f);   // 1-pixel tolerance
+    EXPECT_NEAR(px.v, 178.15f, 1.0f);
 }
 
 TEST(ProjectorTest, PointBehindCameraIsInvalid)

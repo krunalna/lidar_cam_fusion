@@ -15,6 +15,7 @@
 #include "perception_pipeline_cpp/fusion_engine.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace perception_pipeline_cpp {
@@ -45,7 +46,35 @@ FusionResult FusionEngine::fuse(
             continue;
         }
 
-        // ── Step 3: axis-aligned min/max box in Velodyne frame ────────────────
+        // ── Step 2b: keep the nearest depth slice inside the bbox ───────────
+        float nearest_depth = std::numeric_limits<float>::max();
+        for (const uint32_t idx : indices) {
+            const float * p = points_xyzi + idx * 4;
+            const float depth = std::sqrt(
+                p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+            nearest_depth = std::min(nearest_depth, depth);
+        }
+
+        const float depth_gate = nearest_depth + std::max(
+            cfg_.depth_gate_min_m,
+            nearest_depth * cfg_.depth_gate_scale);
+
+        std::vector<uint32_t> gated_indices;
+        gated_indices.reserve(indices.size());
+        for (const uint32_t idx : indices) {
+            const float * p = points_xyzi + idx * 4;
+            const float depth = std::sqrt(
+                p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+            if (depth <= depth_gate) {
+                gated_indices.push_back(idx);
+            }
+        }
+
+        if (static_cast<int>(gated_indices.size()) < cfg_.min_cluster_points) {
+            continue;
+        }
+
+        // ── Step 3: axis-aligned min/max box in Velodyne frame ───────────────
         float x_min =  std::numeric_limits<float>::max();
         float x_max = -std::numeric_limits<float>::max();
         float y_min =  std::numeric_limits<float>::max();
@@ -53,7 +82,7 @@ FusionResult FusionEngine::fuse(
         float z_min =  std::numeric_limits<float>::max();
         float z_max = -std::numeric_limits<float>::max();
 
-        for (const uint32_t idx : indices) {
+        for (const uint32_t idx : gated_indices) {
             const float * p = points_xyzi + idx * 4;
             x_min = std::min(x_min, p[0]);  x_max = std::max(x_max, p[0]);
             y_min = std::min(y_min, p[1]);  y_max = std::max(y_max, p[1]);
@@ -70,7 +99,7 @@ FusionResult FusionEngine::fuse(
         det.size_z = z_max - z_min;
         det.class_id = bbox.class_id;
         det.score    = bbox.score;
-        det.n_points = static_cast<uint32_t>(indices.size());
+        det.n_points = static_cast<uint32_t>(gated_indices.size());
 
         result.detections.push_back(det);
     }

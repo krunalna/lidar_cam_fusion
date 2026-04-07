@@ -25,7 +25,9 @@ namespace perception_pipeline_cpp {
 // ── Config ────────────────────────────────────────────────────────────────────
 
 struct FusionConfig {
-    int min_cluster_points{5};  // minimum LiDAR points to accept a 3D detection
+    int   min_cluster_points{5};     // minimum LiDAR points to accept a 3D detection
+    float depth_gate_min_m{4.0f};    // minimum depth slice thickness from nearest hit
+    float depth_gate_scale{0.20f};   // additional slice thickness relative to nearest depth
 };
 
 // ── Input: one 2D detection ───────────────────────────────────────────────────

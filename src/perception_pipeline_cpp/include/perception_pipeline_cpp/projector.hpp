@@ -5,10 +5,10 @@
  * =============
  * Projects Velodyne LiDAR points into image-plane pixel coordinates.
  *
- * Core equation:  p_image = K × T × P_lidar
+ * Core equation:  p_image = P × T × P_lidar
  *
  *   T  (4×4) — extrinsic: Velodyne frame → rectified camera frame
- *   K  (3×3) — intrinsic: camera focal length + principal point
+ *   P  (3×4) — KITTI P2 projection matrix for the image-producing camera
  *
  * No ROS dependency — pure math utility used by the fusion node (Phase 6).
  */
@@ -71,8 +71,8 @@ public:
         float x1, float y1, float x2, float y2) const;
 
 private:
-    Eigen::Matrix3f K_;     // 3×3 camera intrinsic
-    Eigen::Matrix4f T_;     // 4×4 Velodyne→camera extrinsic
+    Eigen::Matrix<float, 3, 4> P_;  // 3×4 KITTI projection matrix
+    Eigen::Matrix4f T_;             // 4×4 Velodyne→camera extrinsic
     int width_{0}, height_{0};
 };
 

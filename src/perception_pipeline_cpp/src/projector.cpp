@@ -3,10 +3,10 @@
  * =============
  * Implements Velodyne → image-plane projection using:
  *
- *   p = K × (T × P_lidar)[0:3]   followed by homogeneous divide
+ *   p = P × (T × P_lidar)   followed by homogeneous divide
  *
- * where T is the 4×4 Velodyne→camera extrinsic and K is the 3×3 intrinsic
- * built from (fx, fy, cx, cy). All matrix ops use Eigen.
+ * where T is the 4×4 Velodyne→camera extrinsic and P is the 3×4 KITTI
+ * projection matrix for the target camera. All matrix ops use Eigen.
  */
 
 #include "perception_pipeline_cpp/projector.hpp"
@@ -18,10 +18,7 @@ namespace perception_pipeline_cpp {
 Projector::Projector(const CalibrationData & cal)
 : T_(cal.T), width_(cal.width), height_(cal.height)
 {
-    // Build 3×3 intrinsic matrix from scalar parameters
-    K_ << cal.fx, 0.f,    cal.cx,
-          0.f,    cal.fy, cal.cy,
-          0.f,    0.f,    1.f;
+    P_ = cal.P;
 }
 
 // ── Single-point projection ───────────────────────────────────────────────────
@@ -37,8 +34,8 @@ Projector::PixelCoord Projector::project(float x, float y, float z) const
         return {};   // default: valid=false
     }
 
-    // Step 3: project to image plane  (K × [Xc, Yc, Zc]^T)
-    const Eigen::Vector3f p = K_ * P_cam.head<3>();
+    // Step 3: project to image plane with KITTI P2
+    const Eigen::Vector3f p = P_ * P_cam;
 
     // Step 4: homogeneous divide
     const float u = p[0] / p[2];

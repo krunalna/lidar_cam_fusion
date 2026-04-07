@@ -150,6 +150,7 @@ target_include_directories(calib_utils
     include
     ${OpenCV_INCLUDE_DIRS}
 )
+target_link_directories(calib_utils PUBLIC "${CONDA_LIB_DIR}")
 target_link_libraries(calib_utils
   Eigen3::Eigen
   ${OpenCV_LIBS}
@@ -201,7 +202,7 @@ set_target_properties(camera_detector_cpp PROPERTIES
   INSTALL_RPATH "$ORIGIN;${ORT_SHARED_LIB_DIR}"
 )
 if(UNIX AND NOT APPLE)
-  add_custom_command(TARGET camera_detector_cpp POST_BUILD
+  set(_ort_post_build_cmds
     COMMAND "${CMAKE_COMMAND}" -E create_symlink
             "${ORT_SHARED_LIB}"
             "$<TARGET_FILE_DIR:camera_detector_cpp>/${ORT_SHARED_LIB_NAME}"
@@ -211,6 +212,20 @@ if(UNIX AND NOT APPLE)
     COMMAND "${CMAKE_COMMAND}" -E create_symlink
             "${ORT_SHARED_LIB_DIR}/libonnxruntime_providers_shared.so"
             "$<TARGET_FILE_DIR:camera_detector_cpp>/libonnxruntime_providers_shared.so"
+  )
+  # CUDA execution provider (present when onnxruntime-gpu is installed)
+  if(EXISTS "${ORT_SHARED_LIB_DIR}/libonnxruntime_providers_cuda.so")
+    list(APPEND _ort_post_build_cmds
+      COMMAND "${CMAKE_COMMAND}" -E create_symlink
+              "${ORT_SHARED_LIB_DIR}/libonnxruntime_providers_cuda.so"
+              "$<TARGET_FILE_DIR:camera_detector_cpp>/libonnxruntime_providers_cuda.so"
+    )
+    message(STATUS "ONNX Runtime: CUDA provider found — GPU inference enabled")
+  else()
+    message(STATUS "ONNX Runtime: no CUDA provider — CPU inference only")
+  endif()
+  add_custom_command(TARGET camera_detector_cpp POST_BUILD
+    ${_ort_post_build_cmds}
     VERBATIM
   )
 endif()
@@ -232,6 +247,7 @@ add_executable(fusion_node_cpp
 target_include_directories(fusion_node_cpp
   PRIVATE include ${OpenCV_INCLUDE_DIRS}
 )
+target_link_directories(fusion_node_cpp PRIVATE "${CONDA_LIB_DIR}")
 target_link_libraries(fusion_node_cpp
   calib_utils
   ${OpenCV_LIBS}
@@ -253,11 +269,16 @@ install(TARGETS calib_utils lidar_processor_cpp camera_detector_cpp fusion_node_
   DESTINATION lib/${PROJECT_NAME}
 )
 if(UNIX AND NOT APPLE)
-  install(FILES
+  set(_ort_install_files
     "${ORT_SHARED_LIB}"
     "${ORT_SHARED_LIB_DIR}/libonnxruntime_providers_shared.so"
-    DESTINATION lib/${PROJECT_NAME}
   )
+  if(EXISTS "${ORT_SHARED_LIB_DIR}/libonnxruntime_providers_cuda.so")
+    list(APPEND _ort_install_files
+      "${ORT_SHARED_LIB_DIR}/libonnxruntime_providers_cuda.so"
+    )
+  endif()
+  install(FILES ${_ort_install_files} DESTINATION lib/${PROJECT_NAME})
   install(CODE
     "execute_process(
       COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
@@ -286,11 +307,13 @@ if(BUILD_TESTING)
   endif()
 
   ament_add_gtest(test_projector test/test_projector.cpp)
+  target_link_directories(test_projector PRIVATE "${CONDA_LIB_DIR}")
   target_link_libraries(test_projector calib_utils)
   target_compile_definitions(test_projector PRIVATE
     CALIBRATION_YAML_PATH="${_calib_yaml}")
 
   ament_add_gtest(test_fusion_engine test/test_fusion_engine.cpp)
+  target_link_directories(test_fusion_engine PRIVATE "${CONDA_LIB_DIR}")
   target_link_libraries(test_fusion_engine calib_utils)
 endif()
 

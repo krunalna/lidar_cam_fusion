@@ -28,6 +28,9 @@ static perception_pipeline_cpp::CalibrationData make_kitti_cal()
     cal.fx = 721.5377f; cal.fy = 721.5377f;
     cal.cx = 609.5593f; cal.cy = 172.8540f;
     cal.width = 1242;   cal.height = 375;
+    cal.P << 721.5377f, 0.0f,      609.5593f, 44.85728f,
+             0.0f,      721.5377f, 172.8540f, 0.2163791f,
+             0.0f,      0.0f,      1.0f,      0.002745884f;
 
     cal.T << 7.533745e-03f, -9.999714e-01f, -6.166020e-04f, -4.069766e-03f,
              1.480249e-02f,  7.280733e-04f, -9.998902e-01f, -7.631618e-02f,
@@ -203,4 +206,46 @@ TEST(FusionEngineTest, BoxCentreAndSizeConsistent)
     // In Velodyne frame: y of first point ≈ -0.5, last ≈ +0.5 → centre ≈ 0
     // Note: cy in camera frame depends on transform, but Velodyne-frame y is direct
     EXPECT_NEAR(d.cy, 0.0f, 0.1f);
+}
+
+TEST(FusionEngineTest, NearestDepthSliceBeatsBackground)
+{
+    const auto cal = make_kitti_cal();
+    perception_pipeline_cpp::Projector proj(cal);
+    perception_pipeline_cpp::FusionEngine engine;
+
+    std::vector<float> pts;
+    pts.reserve(20 * 4);
+
+    // Foreground car-like cluster around 5 m.
+    for (int i = 0; i < 10; ++i) {
+        pts.insert(pts.end(), {
+            5.0f + 0.1f * static_cast<float>(i % 3),
+            -0.8f + 0.18f * static_cast<float>(i),
+            -1.0f,
+            1.0f,
+        });
+    }
+
+    // Background points on the same viewing ray family, much farther away.
+    for (int i = 0; i < 10; ++i) {
+        pts.insert(pts.end(), {
+            20.0f + 0.2f * static_cast<float>(i % 3),
+            -0.8f + 0.18f * static_cast<float>(i),
+            -1.0f,
+            1.0f,
+        });
+    }
+
+    std::vector<perception_pipeline_cpp::BBox2D> dets2d = {{
+        0.f, 0.f, 1242.f, 375.f, "car", 0.9f
+    }};
+
+    const auto result = engine.fuse(dets2d, pts.data(), 20, proj);
+    ASSERT_EQ(result.detections.size(), 1u);
+
+    const auto & d = result.detections[0];
+    EXPECT_NEAR(d.cx, 5.1f, 0.5f);
+    EXPECT_LT(d.size_x, 2.0f);
+    EXPECT_EQ(d.n_points, 10u);
 }

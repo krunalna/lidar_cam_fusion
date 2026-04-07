@@ -21,6 +21,8 @@
  * Parameters:
  *   calibration_file       (string) Path to calibration.yaml           [required]
  *   min_cluster_points     (int)    Min LiDAR points per cluster        [default: 5]
+ *   depth_gate_min_m       (double) Minimum nearest-depth slice width m [default: 4.0]
+ *   depth_gate_scale       (double) Additional slice width ratio        [default: 0.20]
  *   sync_slop              (double) ApproximateTimeSynchronizer slop s  [default: 0.1]
  *   publish_markers        (bool)   Publish MarkerArray for Foxglove    [default: true]
  *   publish_debug_image    (bool)   Publish projected-LiDAR debug image [default: true]
@@ -132,6 +134,8 @@ public:
         // ── Parameters ──────────────────────────────────────────────────────
         declare_parameter<std::string>("calibration_file",    "");
         declare_parameter<int>        ("min_cluster_points",  5);
+        declare_parameter<double>     ("depth_gate_min_m",    4.0);
+        declare_parameter<double>     ("depth_gate_scale",    0.20);
         declare_parameter<double>     ("sync_slop",           0.1);
         declare_parameter<bool>       ("publish_markers",     true);
         declare_parameter<bool>       ("publish_debug_image", true);
@@ -145,6 +149,8 @@ public:
 
         FusionConfig cfg;
         cfg.min_cluster_points = get_parameter("min_cluster_points").as_int();
+        cfg.depth_gate_min_m   = static_cast<float>(get_parameter("depth_gate_min_m").as_double());
+        cfg.depth_gate_scale   = static_cast<float>(get_parameter("depth_gate_scale").as_double());
         const double slop      = get_parameter("sync_slop").as_double();
         publish_markers_       = get_parameter("publish_markers").as_bool();
         publish_debug_image_   = get_parameter("publish_debug_image").as_bool();
@@ -199,8 +205,10 @@ public:
 
         RCLCPP_INFO(get_logger(),
             "FusionNode ready — min_cluster_points=%d  sync_slop=%.2f s"
+            "  depth_gate_min_m=%.2f  depth_gate_scale=%.2f"
             "  publish_markers=%s  publish_debug_image=%s",
             cfg.min_cluster_points, slop,
+            cfg.depth_gate_min_m, cfg.depth_gate_scale,
             publish_markers_     ? "true" : "false",
             publish_debug_image_ ? "true" : "false");
     }
