@@ -1,12 +1,13 @@
 """
-C++ LiDAR Processor verify script
-===================================
+LiDAR Processor verify script
+=============================
 Verifies the perception_pipeline_cpp package: source files, build artifact,
 and a live ROS dry-run against the compiled binary.
 
-Run with: pixi run verify-cpp-lidar
+Run with: pixi run verify-lidar
 """
 
+import os
 import subprocess
 import sys
 import time
@@ -15,7 +16,12 @@ from pathlib import Path
 import numpy as np
 
 WORKSPACE_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(WORKSPACE_ROOT / "src/perception_pipeline"))
+ROS_LOG_DIR = Path("/tmp/ros_logs")
+ROS_LOG_DIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("ROS_LOG_DIR", str(ROS_LOG_DIR))
+sys.path.insert(0, str(WORKSPACE_ROOT / "scripts"))
+
+from pc2_helpers import _numpy_to_pc2, _pc2_to_numpy
 
 PASS = "\033[92m  PASS\033[0m"
 FAIL = "\033[91m  FAIL\033[0m"
@@ -33,9 +39,6 @@ def check(label, ok, detail="", warn_only=False):
         failures.append(label)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# A. Source files
-# ═══════════════════════════════════════════════════════════════════════════════
 print(f"\n{BOLD}A. Source files{RESET}")
 
 pkg_root = WORKSPACE_ROOT / "src/perception_pipeline_cpp"
@@ -50,46 +53,31 @@ check("CMakeLists.txt exists",
       (pkg_root / "CMakeLists.txt").exists())
 
 launch_text = (pkg_root / "launch/fusion_pipeline_cpp.launch.py").read_text()
-check("launch file references lidar_processor_cpp",
-      "lidar_processor_cpp" in launch_text)
-check("launch file reuses Python kitti_publisher",
-      "perception_pipeline" in launch_text and "kitti_publisher" in launch_text)
+check("launch file references lidar_processor_cpp", "lidar_processor_cpp" in launch_text)
+check("launch file references package-owned kitti_publisher",
+      'package="perception_pipeline_cpp"' in launch_text and "kitti_publisher" in launch_text)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# B. Build artifact
-# ═══════════════════════════════════════════════════════════════════════════════
 print(f"\n{BOLD}B. Build artifact{RESET}")
 
 binary = WORKSPACE_ROOT / "install/perception_pipeline_cpp/lib/perception_pipeline_cpp/lidar_processor_cpp"
 check("lidar_processor_cpp binary exists", binary.exists(), str(binary))
 
 if not binary.exists():
-    print(f"{FAIL}  Binary not found — run: pixi run build-cpp")
+    print(f"{FAIL}  Binary not found — run: pixi run build")
     print(f"\n{'─' * 50}")
     print(f"\033[91m{BOLD}FAILED{RESET} — binary missing, cannot run dry-run.")
     sys.exit(1)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# C. ROS dry-run — launch the C++ node as a subprocess, publish synthetic data,
-#    verify it publishes to /lidar/filtered and /lidar/ground_plane.
-# ═══════════════════════════════════════════════════════════════════════════════
 print(f"\n{BOLD}C. ROS dry-run{RESET}")
 
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Header
 
-# Import the Python helpers for building/reading PointCloud2 messages
-try:
-    from perception_pipeline.lidar_processor_node import _numpy_to_pc2, _pc2_to_numpy
-    check("Python PC2 helpers importable", True)
-except ImportError as e:
-    check("Python PC2 helpers importable", False, str(e))
-    sys.exit(1)
+check("Repo-local PC2 helpers importable", True)
 
-# Build a synthetic cloud: flat ground plane + object cluster
 rng = np.random.default_rng(42)
 n_ground = 3000
 n_obj = 400
@@ -98,7 +86,7 @@ ground_pts = np.column_stack([
     rng.uniform(0, 40, n_ground),
     rng.uniform(-8, 8, n_ground),
     rng.normal(-1.7, 0.05, n_ground),
-    rng.uniform(0.1, 0.9, n_ground),   # non-zero intensity
+    rng.uniform(0.1, 0.9, n_ground),
 ]).astype(np.float32)
 
 obj_pts = np.column_stack([
@@ -121,7 +109,7 @@ try:
         depth=5,
     )
 
-    spy = rclpy.create_node("verify_cpp_lidar_spy")
+    spy = rclpy.create_node("verify_lidar_spy")
 
     def on_filtered(msg):
         received["filtered"].append(msg)
@@ -129,25 +117,22 @@ try:
     def on_ground(msg):
         received["ground"].append(msg)
 
-    spy.create_subscription(PointCloud2, "/lidar/filtered",     on_filtered, qos)
-    spy.create_subscription(PointCloud2, "/lidar/ground_plane", on_ground,   qos)
+    spy.create_subscription(PointCloud2, "/lidar/filtered", on_filtered, qos)
+    spy.create_subscription(PointCloud2, "/lidar/ground_plane", on_ground, qos)
     pub = spy.create_publisher(PointCloud2, "/lidar/points", qos)
 
-    # Launch the C++ node in a subprocess
-    import os
     env = os.environ.copy()
-    # Ensure the install overlay is on the path
     setup_bash = WORKSPACE_ROOT / "install/setup.bash"
     if setup_bash.exists():
-        # Source install/setup.bash by running through bash and capturing env
         result = subprocess.run(
             ["bash", "-c", f"source {setup_bash} && env"],
-            capture_output=True, text=True
+            capture_output=True,
+            text=True,
         )
         for line in result.stdout.splitlines():
             if "=" in line:
-                k, _, v = line.partition("=")
-                env[k] = v
+                key, _, value = line.partition("=")
+                env[key] = value
 
     cpp_proc = subprocess.Popen(
         [str(binary)],
@@ -160,12 +145,10 @@ try:
     executor = SingleThreadedExecutor()
     executor.add_node(spy)
 
-    # Give the C++ node a moment to start up and connect
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:
         executor.spin_once(timeout_sec=0.05)
 
-    # Build and publish the test message
     hdr = Header()
     hdr.frame_id = "velodyne"
     hdr.stamp = spy.get_clock().now().to_msg()
@@ -188,22 +171,16 @@ try:
           len(received["ground"]) > 0,
           f"{len(received['ground'])} msg(s)")
 
-    # ── Validate filtered cloud structure ─────────────────────────────────────
     if received["filtered"]:
         fmsg = received["filtered"][0]
-        check("filtered point_step == 16",
-              fmsg.point_step == 16,
-              f"got {fmsg.point_step}")
+        check("filtered point_step == 16", fmsg.point_step == 16, f"got {fmsg.point_step}")
         check("filtered frame_id preserved",
               fmsg.header.frame_id == "velodyne",
               f"got '{fmsg.header.frame_id}'")
-        check("filtered width > 0",
-              fmsg.width > 0,
-              f"{fmsg.width} points")
+        check("filtered width > 0", fmsg.width > 0, f"{fmsg.width} points")
 
-        # Check intensity channel is present and non-zero
         pts_back = _pc2_to_numpy(fmsg)
-        has_intensity_field = any(f.name == "intensity" for f in fmsg.fields)
+        has_intensity_field = any(field.name == "intensity" for field in fmsg.fields)
         check("filtered has intensity field", has_intensity_field)
         if has_intensity_field and pts_back.shape[0] > 0:
             max_intensity = float(pts_back[:, 3].max())
@@ -213,14 +190,9 @@ try:
 
     if received["ground"]:
         gmsg = received["ground"][0]
-        check("ground point_step == 16",
-              gmsg.point_step == 16,
-              f"got {gmsg.point_step}")
-        check("ground width > 0",
-              gmsg.width > 0,
-              f"{gmsg.width} points")
+        check("ground point_step == 16", gmsg.point_step == 16, f"got {gmsg.point_step}")
+        check("ground width > 0", gmsg.width > 0, f"{gmsg.width} points")
 
-        # Ground z should be near planted plane (~-1.7)
         gpts = _pc2_to_numpy(gmsg)
         if gpts.shape[0] > 0:
             mean_z = float(gpts[:, 2].mean())
@@ -228,7 +200,6 @@ try:
                   abs(mean_z - (-1.7)) < 0.6,
                   f"mean z={mean_z:.3f}")
 
-    # ── Pipeline reduction sanity check ───────────────────────────────────────
     if received["filtered"] and received["ground"]:
         n_filtered = received["filtered"][0].width
         n_ground_pts = received["ground"][0].width
@@ -237,14 +208,14 @@ try:
               total_out < len(cloud),
               f"in={len(cloud)}  out={total_out}")
 
-    # ── C++ node still running? ────────────────────────────────────────────────
     check("C++ node still alive after dry-run",
           cpp_proc.poll() is None,
           f"exit code: {cpp_proc.poll()}")
 
-except Exception as e:
-    check("ROS dry-run", False, str(e))
-    import traceback; traceback.print_exc()
+except Exception as exc:
+    check("ROS dry-run", False, str(exc))
+    import traceback
+    traceback.print_exc()
 finally:
     if cpp_proc and cpp_proc.poll() is None:
         cpp_proc.terminate()
@@ -255,15 +226,12 @@ finally:
     if rclpy.ok():
         rclpy.shutdown()
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Summary
-# ═══════════════════════════════════════════════════════════════════════════════
 print(f"\n{'─' * 50}")
 if failures:
     print(f"\033[91m{BOLD}FAILED{RESET} — {len(failures)} check(s) not passing:")
-    for f in failures:
-        print(f"  • {f}")
+    for failure in failures:
+        print(f"  • {failure}")
     sys.exit(1)
 else:
-    print(f"\033[92m{BOLD}ALL CHECKS PASSED{RESET} — C++ LiDAR processor (perception_pipeline_cpp) is ready.")
+    print(f"\033[92m{BOLD}ALL CHECKS PASSED{RESET} — LiDAR processor is ready.")
 print()

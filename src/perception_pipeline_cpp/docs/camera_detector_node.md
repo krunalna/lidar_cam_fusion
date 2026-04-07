@@ -2,7 +2,7 @@
 
 `camera_detector_cpp` — Phase 4 of the C++ perception pipeline.
 
-Subscribes to raw camera frames, runs YOLOv8n inference via ONNX Runtime, and publishes 2D bounding-box detections. Mirrors the behaviour of the Python `camera_detector` node but with no ultralytics dependency at runtime.
+Subscribes to raw camera frames, runs YOLOv8n inference via ONNX Runtime, and publishes 2D bounding-box detections.
 
 ---
 
@@ -177,7 +177,7 @@ pixi run export-onnx           # writes models/yolov8n.onnx
 
 Export settings: opset 12, static input shape (1, 3, 640, 640), simplified with onnxslim.
 
-The C++ headers for ONNX Runtime are downloaded automatically by CMake on first configure via `FetchContent` (matching the version installed in the pixi environment). The shared library is taken from `site-packages/onnxruntime/capi/`.
+The C++ headers for ONNX Runtime are downloaded automatically by CMake on first configure via `FetchContent` (matching the version installed in the pixi environment). The runtime library is resolved from the active pixi environment, with the macOS build preferring the official CoreML-enabled prebuilt.
 
 ---
 

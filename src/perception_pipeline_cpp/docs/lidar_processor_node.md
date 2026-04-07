@@ -2,7 +2,7 @@
 
 `lidar_processor_cpp` — Phase 3 of the C++ perception pipeline.
 
-Subscribes to raw Velodyne point clouds, runs a 4-stage PCL preprocessing pipeline, and publishes filtered (non-ground) and ground-plane clouds. Mirrors the behaviour of the Python `lidar_processor` node.
+Subscribes to raw Velodyne point clouds, runs a 4-stage PCL preprocessing pipeline, and publishes filtered (non-ground) and ground-plane clouds.
 
 ---
 
@@ -33,7 +33,7 @@ Subscribes to raw Velodyne point clouds, runs a 4-stage PCL preprocessing pipeli
 | `ransac_iter` | int | `100` | Maximum RANSAC iterations |
 | `max_depth` | double | `50.0` | Maximum Euclidean distance from origin to keep (m) |
 
-All parameters match the Python node defaults to ensure identical output on the same data.
+These parameters define the preprocessing envelope, downsampling density, and ground-plane fit threshold for the production pipeline.
 
 ---
 
@@ -97,7 +97,7 @@ If fewer than 10 points remain after cropping, the pipeline short-circuits and r
 
 ### 2 · Voxel Downsampling
 
-Uses PCL `VoxelGrid` with leaf size 0.1 m. Each voxel cell is replaced by the centroid of all points that fall within it. Intensity is averaged across all points in the voxel — this matches the Python node's custom numpy voxel grid behaviour.
+Uses PCL `VoxelGrid` with leaf size 0.1 m. Each voxel cell is replaced by the centroid of all points that fall within it. Intensity is averaged across all points in the voxel.
 
 Reduces point count by ~10× on a typical KITTI scan (~115,000 → ~10,000 points in the ROI).
 

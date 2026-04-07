@@ -18,7 +18,7 @@
  *
  * Export the ONNX model first:
  *   pixi run export-onnx
- *   YOLO_ONNX=$(pwd)/models/yolov8n.onnx pixi run launch-cpp
+ *   YOLO_ONNX=$(pwd)/models/yolov8n.onnx pixi run launch
  */
 
 #include <chrono>
@@ -92,7 +92,7 @@ public:
                 "model_path parameter is empty. Export the model first:\n"
                 "  pixi run export-onnx\n"
                 "Then launch with:\n"
-                "  YOLO_ONNX=$(pwd)/models/yolov8n.onnx pixi run launch-cpp");
+                "  YOLO_ONNX=$(pwd)/models/yolov8n.onnx pixi run launch");
             throw std::runtime_error("model_path not set");
         }
 
@@ -117,7 +117,7 @@ public:
             RCLCPP_WARN(get_logger(),
                 "No GPU acceleration — inference will run on CPU. "
                 "On macOS, ensure the official ONNX Runtime prebuilt (CoreML EP) "
-                "is linked (rebuild with: pixi run build-cpp). "
+                "is linked (rebuild with: pixi run build). "
                 "On Linux, install onnxruntime-gpu for CUDA acceleration.");
         }
 

@@ -317,6 +317,10 @@ endif()
 install(TARGETS calib_utils lidar_processor_cpp camera_detector_cpp fusion_node_cpp
   DESTINATION lib/${PROJECT_NAME}
 )
+install(PROGRAMS scripts/kitti_publisher.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME kitti_publisher
+)
 if(UNIX AND NOT APPLE)
   set(_ort_install_files
     "${ORT_SHARED_LIB}"
@@ -341,18 +345,21 @@ install(DIRECTORY include/
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
 )
+install(DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}/config
+)
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
-  # Resolve path to calibration.yaml (installed alongside perception_pipeline)
+  # Resolve path to calibration.yaml owned by this package.
   set(_calib_yaml
-    "${CMAKE_CURRENT_SOURCE_DIR}/../perception_pipeline/config/calibration.yaml")
+    "${CMAKE_CURRENT_SOURCE_DIR}/config/calibration.yaml")
   if(NOT EXISTS "${_calib_yaml}")
     # Fallback: installed share directory
     set(_calib_yaml
-      "${CMAKE_INSTALL_PREFIX}/../perception_pipeline/share/perception_pipeline/config/calibration.yaml")
+      "${CMAKE_INSTALL_PREFIX}/share/${PROJECT_NAME}/config/calibration.yaml")
   endif()
 
   ament_add_gtest(test_projector test/test_projector.cpp)
