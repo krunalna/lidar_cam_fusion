@@ -137,7 +137,7 @@ public:
         declare_parameter<int>        ("min_cluster_points",  5);
         declare_parameter<double>     ("depth_gate_min_m",    4.0);
         declare_parameter<double>     ("depth_gate_scale",    0.20);
-        declare_parameter<double>     ("sync_slop",           0.5);
+        declare_parameter<double>     ("sync_slop",           0.2);
         declare_parameter<bool>       ("publish_markers",     true);
         declare_parameter<bool>       ("publish_debug_image", true);
 

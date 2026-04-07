@@ -29,7 +29,7 @@ Subscribes to `/detections_2d` and `/lidar/filtered`, synchronises them by times
 | `min_cluster_points` | int | `5` | Minimum LiDAR points inside a frustum to accept as a 3D detection. |
 | `depth_gate_min_m` | double | `4.0` | Minimum depth-slice thickness (metres) from the nearest in-frustum point. |
 | `depth_gate_scale` | double | `0.20` | Additional slice thickness as a fraction of nearest depth (`nearest × 0.20`). |
-| `sync_slop` | double | `0.5` | `ApproximateTimeSynchronizer` max allowed stamp difference (seconds). |
+| `sync_slop` | double | `0.2` | `ApproximateTimeSynchronizer` max allowed stamp difference (seconds). |
 | `publish_markers` | bool | `true` | Publish `visualization_msgs/MarkerArray` for Foxglove 3D panel. |
 | `publish_debug_image` | bool | `true` | Publish projected-LiDAR debug image on `/fusion/debug_image`. |
 
@@ -51,7 +51,7 @@ The fusion logic is split into two layers, following the same pattern as the LiD
 /lidar/filtered (sensor_msgs/PointCloud2)
         │                │
         └────────────────┘
-     ApproximateTimeSynchronizer (slop = 0.5 s)
+     ApproximateTimeSynchronizer (slop = 0.2 s)
                 │
                 ▼
   ┌──────────────────────────────────┐
@@ -166,7 +166,7 @@ The debug image is rendered using OpenCV and converts RGB↔BGR as needed. It is
 
 ## Time Synchronisation
 
-`ApproximateTimeSynchronizer` matches `/detections_2d` and `/lidar/filtered` messages by header timestamp within `sync_slop` seconds (default 0.5 s). The KITTI publisher publishes both at the same rate (default 10 Hz), so stamps are typically within a single frame period (~0.1 s).
+`ApproximateTimeSynchronizer` matches `/detections_2d` and `/lidar/filtered` messages by header timestamp within `sync_slop` seconds (default 0.2 s). The KITTI publisher publishes both at the same rate (default 10 Hz), so stamps are typically within a single frame period (~0.1 s).
 
 The camera image subscription is **independent** — it uses a separate subscriber with `KeepLast(1)` and its latest message is cached under a mutex. This avoids adding a third input to the synchronizer (which would reduce match rate), while still providing an up-to-date background image for the debug overlay.
 
@@ -200,7 +200,7 @@ Fields: `deser` = deserialization, `fuse` = FusionEngine, `pub/dbg` = publishing
 
 ```
 [fusion_node_cpp-4] Loading calibration: /path/to/calibration.yaml
-[fusion_node_cpp-4] FusionNode ready — min_cluster_points=5  sync_slop=0.50 s  depth_gate_min_m=4.00  depth_gate_scale=0.20  publish_markers=true  publish_debug_image=true
+[fusion_node_cpp-4] FusionNode ready — min_cluster_points=5  sync_slop=0.20 s  depth_gate_min_m=4.00  depth_gate_scale=0.20  publish_markers=true  publish_debug_image=true
 [fusion_node_cpp-4] Frame    1 |   0.0 Hz | total=  5.3 ms (deser=  1.2  fuse=  3.4  pub/dbg=  0.7) | 2D=3 LiDAR=7480 → 3D=2
 [fusion_node_cpp-4] Frame    2 |  10.1 Hz | total=  4.8 ms (deser=  1.1  fuse=  3.1  pub/dbg=  0.6) | 2D=5 LiDAR=7512 → 3D=3
 [fusion_node_cpp-4] Frame    3 |  10.0 Hz | total=  4.7 ms (deser=  1.0  fuse=  3.0  pub/dbg=  0.7) | 2D=4 LiDAR=7491 → 3D=3
