@@ -165,9 +165,14 @@ public:
         rclcpp::QoS qos5(rclcpp::KeepLast(5));
         qos5.reliable();
 
+        // KeepLast(1) for sync inputs: prevents old messages piling up in the
+        // synchronizer buffer and causing burst-then-silence behaviour.
+        rclcpp::QoS qos1(rclcpp::KeepLast(1));
+        qos1.reliable();
+
         // ── Synchronized subscribers (detections + LiDAR) ───────────────────
-        sub_det_.subscribe(this, "/detections_2d",  qos5.get_rmw_qos_profile());
-        sub_pts_.subscribe(this, "/lidar/filtered", qos5.get_rmw_qos_profile());
+        sub_det_.subscribe(this, "/detections_2d",  qos1.get_rmw_qos_profile());
+        sub_pts_.subscribe(this, "/lidar/filtered", qos1.get_rmw_qos_profile());
 
         sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
             SyncPolicy(10), sub_det_, sub_pts_);
