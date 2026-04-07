@@ -16,7 +16,7 @@ Example:
   # 2. Launch
   KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync \\
   YOLO_ONNX=$(pwd)/models/yolov8n.onnx \\
-  pixi run launch-cpp
+  pixi run launch
 """
 
 import os
@@ -52,7 +52,7 @@ def generate_launch_description():
     _calib_default = os.environ.get(
         "CALIB_FILE",
         os.path.join(
-            get_package_share_directory("perception_pipeline"),
+            get_package_share_directory("perception_pipeline_cpp"),
             "config", "calibration.yaml"))
     calib_arg = DeclareLaunchArgument(
         "calibration_file",
@@ -60,9 +60,9 @@ def generate_launch_description():
         description="Path to KITTI calibration YAML",
     )
 
-    # ── KITTI publisher (Phase 2 — reused from Python package) ───────────────
+    # ── KITTI publisher (Phase 2) ─────────────────────────────────────────────
     kitti_publisher = Node(
-        package="perception_pipeline",
+        package="perception_pipeline_cpp",
         executable="kitti_publisher",
         name="kitti_publisher",
         parameters=[{

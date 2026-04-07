@@ -21,7 +21,7 @@ Loads KITTI calibration parameters from YAML and implements the core equation th
 
 ### YAML Structure
 
-`Calibration` reads `src/perception_pipeline/config/calibration.yaml` (path passed at construction). Expected structure:
+`Calibration` reads `src/perception_pipeline_cpp/config/calibration.yaml` (path passed at construction). Expected structure:
 
 ```yaml
 camera:
@@ -271,4 +271,4 @@ auto indices = proj.points_in_bbox(
 | `src/calibration.cpp` | YAML loading, OpenCV `FileStorage` parsing, Eigen matrix mapping |
 | `include/perception_pipeline_cpp/projector.hpp` | `Projector` class, `PixelCoord` struct, API declarations |
 | `src/projector.cpp` | `project()`, `project_cloud()`, `points_in_bbox()` implementations |
-| `src/perception_pipeline/config/calibration.yaml` | KITTI intrinsics + extrinsic for sequence `0001` |
+| `src/perception_pipeline_cpp/config/calibration.yaml` | KITTI intrinsics + extrinsic for sequence `0001` |

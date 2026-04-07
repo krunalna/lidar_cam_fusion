@@ -19,7 +19,7 @@ Subscribes to raw Velodyne point clouds, runs a four-stage C++ preprocessing pip
 
 ## Architecture
 
-The implementation uses the same two-class split as the Python LiDAR processor node:
+The implementation uses a two-class split:
 
 - **`LidarPreprocessor`** — pure C++, no ROS dependency, fully unit-testable. Accepts a flat `float32` buffer of `N * 4` values in `[x, y, z, intensity]` order and returns a `LidarPreprocessorResult` struct containing the filtered and ground buffers plus per-stage point counts. Configured entirely via `LidarPreprocessorConfig`.
 - **`LidarProcessorNode`** — ROS 2 node (`rclcpp::Node` subclass). Handles subscription, `PointCloud2` parsing, calling `LidarPreprocessor::process()`, and publishing. All ROS parameter declarations and QoS setup live here; the core logic does not.
@@ -57,7 +57,7 @@ This separation means the preprocessing pipeline can be exercised in GTest unit 
         │     Fit dominant plane → split inliers (ground) / outliers (objects)
         │     result.stats.n_ground  /  result.stats.n_output
         │
-        └─ Pack to flat float32 buffers (intensity zeroed)
+        └─ Pack to flat float32 buffers (voxel-averaged intensity preserved)
                result.filtered   N_out * 4
                result.ground     N_gnd * 4
         │
@@ -96,7 +96,7 @@ z: [roi_z_min, roi_z_max]  =  [-3.0,  2.0] m
 
 Divides the ROI cloud into a uniform 3-D grid of cubic voxels with side length `voxel_size` (default 0.1 m) and replaces all points in each occupied voxel with their centroid. This enforces a maximum spatial density and reduces the point count before the more expensive RANSAC step.
 
-**What gets discarded:** redundant nearby points within the same voxel cell. Intensity values are averaged by PCL's centroid computation; they are subsequently zeroed out in the output buffers (see Key Implementation Details). If fewer than 10 points survive, the pipeline returns early.
+**What gets discarded:** redundant nearby points within the same voxel cell. Intensity values are averaged by PCL's centroid computation and preserved in the output buffers. If fewer than 10 points survive, the pipeline returns early.
 
 ---
 
@@ -177,15 +177,15 @@ for (const auto & f : msg.fields) {
 
 Each point is then accessed as `msg.data.data() + i * msg.point_step + field_offset`, cast with `reinterpret_cast<const float *>`. If no `intensity` field is found, the intensity channel defaults to `0.0f`. This makes the node compatible with any `PointCloud2` producer regardless of field ordering or the presence of extra fields.
 
-### Intensity zeroing after voxel grid
+### Intensity handling after voxel grid
 
-PCL's `VoxelGrid` filter computes the centroid of all points in each voxel, which includes averaging the intensity channel. The resulting averaged intensities are not meaningful in the context of downstream fusion (which relies only on XYZ geometry) and would differ from the Python node's behavior. The output packing loop explicitly writes `0.0f` for intensity on every point in both `result.filtered` and `result.ground`:
+PCL's `VoxelGrid` filter computes the centroid of all points in each voxel, which includes averaging the intensity channel. The implementation preserves that averaged intensity when packing both `result.filtered` and `result.ground`:
 
 ```cpp
-result.filtered.push_back(0.0f);  // intensity zeroed (voxel grid loses it)
+result.filtered.push_back(pt.intensity);
 ```
 
-This keeps the output schema consistent with the Python `LidarPreprocessor` and avoids confusing any subscriber that inspects the intensity field.
+This keeps the output schema aligned with the actual point cloud data emitted by the node while preserving compatibility with downstream subscribers that expect an intensity field.
 
 ### macOS libpython flat-namespace fix
 

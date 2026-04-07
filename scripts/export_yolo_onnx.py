@@ -56,7 +56,7 @@ def main() -> None:
     print("  rows 0-3  : cx, cy, w, h  (letterboxed 640-space)")
     print("  rows 4-83 : 80 COCO class scores")
     print("\nNext steps:")
-    print(f"  KITTI_SEQ=<path> YOLO_ONNX=$(pwd)/{output} pixi run launch-cpp")
+    print(f"  KITTI_SEQ=<path> YOLO_ONNX=$(pwd)/{output} pixi run launch")
 
 
 if __name__ == "__main__":

@@ -1,43 +1,52 @@
 # LiDAR-Camera Fusion Pipeline
 
-A ROS 2 perception pipeline that replays [KITTI raw dataset](https://www.cvlibs.net/datasets/kitti/raw_data.php) sequences as simulated live sensor streams, and progressively adds 2D object detection, 3D point cloud processing, and sensor fusion.
+A ROS 2 Jazzy perception pipeline that replays [KITTI raw dataset](https://www.cvlibs.net/datasets/kitti/raw_data.php) sequences as live sensor streams and runs LiDAR preprocessing, YOLOv8 2D detection, calibration-based projection, and frustum fusion.
+
+The repo now supports a single ROS package: `perception_pipeline_cpp`.
 
 ## Architecture
 
-```
+```text
 KITTI Files on Disk
-        │
-        ▼
-┌─────────────────────┐
-│  kitti_publisher    │  ── /camera/image_raw  (sensor_msgs/Image)
-│  (implemented)      │  ── /lidar/points      (sensor_msgs/PointCloud2)
-└─────────────────────┘
-        │
-        ▼
-┌─────────────────────┐   ┌──────────────────────┐
-│  camera_detector    │   │  lidar_processor     │   (planned)
-│  YOLOv8 2D boxes    │   │  Open3D clusters     │
-└─────────────────────┘   └──────────────────────┘
-        │                          │
-        └──────────┬───────────────┘
-                   ▼
-        ┌─────────────────────┐
-        │     fusion_node     │   (planned)
-        │  3D bounding boxes  │
-        └─────────────────────┘
+        |
+        v
++----------------------+      /camera/image_raw
+|   kitti_publisher    |----> /lidar/points
+| (Python node, owned  |
+|  by perception_... ) |
++----------------------+
+        |                         +----------------------+
+        +-----------------------> |  camera_detector_cpp |
+        |                         +----------------------+
+        |                                    |
+        |                                    v
+        |                              /detections_2d
+        |                                    |
+        v                                    v
++----------------------+              +-----------------+
+|  lidar_processor_cpp |------------> | fusion_node_cpp |
++----------------------+ /lidar/filtered +-----------------+
+                                           |
+                                           v
+                                   /detections_3d_fused
 ```
 
-| Node | Status | Description |
-|------|--------|-------------|
-| `kitti_publisher` | Done | Reads `.png` + `.bin` files, publishes as ROS 2 topics |
-| `camera_detector` | Planned | YOLOv8-based 2D object detection on camera frames |
-| `lidar_processor` | Planned | Open3D-based point cloud clustering |
-| `fusion_node` | Planned | Time-synchronized fusion of 2D+3D detections |
+## Status
+
+| Phase | Component | Status |
+|---|---|---|
+| 2 | `kitti_publisher` | Done |
+| 3 | `lidar_processor_cpp` | Done |
+| 4 | `camera_detector_cpp` | Done |
+| 5 | Calibration + projection utilities | Done |
+| 6 | `fusion_node_cpp` | Done |
+| 7 | RViz2 / KITTI validation polish | Remaining |
+| Extra | C++ profiling | Remaining |
 
 ## Prerequisites
 
-- **OS:** Ubuntu 24.04 or macOS (Apple Silicon / osx-arm64)
-- **Pixi:** reproducible environment manager
+- Ubuntu 24.04 or macOS Apple Silicon
+- [Pixi](https://pixi.sh/)
 
 ```bash
 curl -fsSL https://pixi.sh/install.sh | bash
@@ -46,145 +55,116 @@ curl -fsSL https://pixi.sh/install.sh | bash
 ## Quick Start
 
 ```bash
-# 1. Install all dependencies (ROS 2 Jazzy + Python stack)
+# 1. Install the environment
 pixi install
 
-# 2. Download default KITTI sequence (~380 MB, 114 frames)
+# 2. Download a KITTI sequence
 pixi run download-kitti
 
-# 3. Build the ROS 2 workspace
+# 3. Export the YOLO ONNX model once
+pixi run export-onnx
+
+# 4. Build the workspace
 pixi run build
 
-# 4. Verify environment and node implementation
+# 5. Run the checks you care about
 pixi run verify-env
 pixi run verify-publisher
+pixi run verify-lidar
+pixi run verify-camera
+pixi run verify-projections
+pixi run verify-fusion
 
-# 5. Launch the pipeline
+# 6. Launch the full pipeline
+KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync \
+YOLO_ONNX=$(pwd)/models/yolov8n.onnx \
 pixi run launch
-# or with a specific sequence:
-ros2 launch perception_pipeline fusion_pipeline.launch.py \
-  sequence_path:=data/kitti/2011_09_26/2011_09_26_drive_0001_sync
 ```
-
-## Project Structure
-
-```
-lidar_cam_fusion/
-├── pixi.toml                          # Dependency management & task definitions
-├── scripts/
-│   ├── activate_ros.sh                # Sourced by Pixi to activate ROS 2 environment
-│   ├── download_kitti.py              # Downloads KITTI sequences from public S3
-│   ├── verify_step1.py                # Validates environment setup (Step 1)
-│   └── verify_step2.py                # Validates kitti_publisher node (Step 2)
-├── data/
-│   └── kitti/                         # Downloaded dataset (gitignored)
-└── src/
-    └── perception_pipeline/
-        ├── package.xml
-        ├── setup.py
-        ├── config/
-        │   └── calibration.yaml       # Camera intrinsics + LiDAR-camera extrinsics
-        ├── launch/
-        │   └── fusion_pipeline.launch.py
-        └── perception_pipeline/
-            ├── kitti_publisher_node.py
-            ├── camera_detector_node.py  # (planned)
-            ├── lidar_processor_node.py  # (planned)
-            ├── fusion_node.py           # (planned)
-            └── utils/
-```
-
-## Configuration
-
-[src/perception_pipeline/config/calibration.yaml](src/perception_pipeline/config/calibration.yaml) stores KITTI calibration values:
-
-| Section | Key Fields | Description |
-|---------|-----------|-------------|
-| `camera` | `K` (3×3), `P2` (3×4) | Intrinsic matrix + rectified projection matrix |
-| `lidar_to_camera` | `T` (4×4) | Homogeneous transform: Velodyne frame → camera frame |
-| `fusion` | `max_depth`, `min_cluster_points` | Runtime filtering thresholds |
-
-The values are derived from KITTI's `calib_cam_to_cam.txt` and `calib_velo_to_cam.txt`. If you use a different sequence date, update this file with the matching calibration.
 
 ## Pixi Tasks
 
-| Task | Command |
-|------|---------|
-| `pixi run build` | `colcon build --symlink-install` for `perception_pipeline` |
-| `pixi run launch` | `ros2 launch perception_pipeline fusion_pipeline.launch.py` |
-| `pixi run play-bag` | `ros2 bag play $BAG_PATH --loop` |
-| `pixi run foxglove` | Launch Foxglove bridge on `FOXGLOVE_PORT` (default `8765`) |
-| `pixi run download-kitti` | Download default KITTI sequence |
-| `pixi run verify-env` | Check environment, ROS 2, and workspace scaffold |
-| `pixi run verify-publisher` | Unit-test the KITTI publisher node |
+| Task | Purpose |
+|---|---|
+| `pixi run build` | Build `perception_pipeline_cpp` in Release mode |
+| `pixi run launch` | Launch the full KITTI + C++ fusion pipeline |
+| `pixi run download-kitti` | Download the default KITTI sequence or list/select others |
+| `pixi run export-onnx` | Export `yolov8n.pt` to `models/yolov8n.onnx` |
+| `pixi run verify-env` | Validate workspace/tooling dependencies |
+| `pixi run verify-publisher` | Dry-run the KITTI publisher |
+| `pixi run verify-lidar` | Dry-run `lidar_processor_cpp` |
+| `pixi run verify-camera` | Dry-run `camera_detector_cpp` |
+| `pixi run verify-projections` | Check calibration/projection math and tests |
+| `pixi run verify-fusion` | Check fusion binary, tests, and node startup |
+| `pixi run play-bag` | Play a ROS bag if `BAG_PATH` is set |
+| `pixi run foxglove` | Run Foxglove bridge |
 
-## Downloading KITTI Data
+## Configuration
 
-```bash
-# Default: 2011_09_26 drive 0001 (~380 MB)
-pixi run download-kitti
+The canonical calibration file lives at `src/perception_pipeline_cpp/config/calibration.yaml`.
 
-# Specific sequence
-python scripts/download_kitti.py --date 2011_09_26 --sequence 0002
+It contains:
 
-# List all available sequences
-python scripts/download_kitti.py --list
+| Section | Key fields | Purpose |
+|---|---|---|
+| `camera` | `fx`, `fy`, `cx`, `cy`, `width`, `height`, `P` | Intrinsics and KITTI projection matrix |
+| `lidar_to_camera` | `T` | Velodyne-to-camera transform |
+| `fusion` | `max_depth`, `min_cluster_points` | Fusion defaults and thresholds |
 
-# Force re-download existing files
-python scripts/download_kitti.py --force
+If you change KITTI recording dates, update the calibration file to the matching sequence values.
+
+## Project Structure
+
+```text
+lidar_cam_fusion/
+├── pixi.toml
+├── scripts/
+│   ├── download_kitti.py
+│   ├── export_yolo_onnx.py
+│   ├── pc2_helpers.py
+│   ├── verify_*.py
+│   └── activate_ros.sh
+├── src/
+│   └── perception_pipeline_cpp/
+│       ├── CMakeLists.txt
+│       ├── package.xml
+│       ├── config/
+│       │   └── calibration.yaml
+│       ├── launch/
+│       │   └── fusion_pipeline_cpp.launch.py
+│       ├── scripts/
+│       │   └── kitti_publisher.py
+│       ├── include/perception_pipeline_cpp/
+│       ├── src/
+│       ├── test/
+│       └── docs/
+└── data/kitti/
 ```
 
-Data is saved to `data/kitti/<date>/<date>_drive_<seq>_sync/` and is gitignored.
+## Main Topics
 
-## Foxglove
+| Topic | Type | Producer |
+|---|---|---|
+| `/camera/image_raw` | `sensor_msgs/Image` | `kitti_publisher` |
+| `/lidar/points` | `sensor_msgs/PointCloud2` | `kitti_publisher` |
+| `/lidar/filtered` | `sensor_msgs/PointCloud2` | `lidar_processor_cpp` |
+| `/lidar/ground_plane` | `sensor_msgs/PointCloud2` | `lidar_processor_cpp` |
+| `/detections_2d` | `vision_msgs/Detection2DArray` | `camera_detector_cpp` |
+| `/camera/detections_viz` | `sensor_msgs/Image` | `camera_detector_cpp` |
+| `/detections_3d_fused` | `vision_msgs/Detection3DArray` | `fusion_node_cpp` |
+| `/detections_3d_markers` | `visualization_msgs/MarkerArray` | `fusion_node_cpp` |
+| `/fusion/debug_image` | `sensor_msgs/Image` | `fusion_node_cpp` |
 
-Run the bridge with:
+## Verification Notes
 
-```bash
-pixi run foxglove
-```
+- `verify-publisher` imports the publisher source directly from `src/perception_pipeline_cpp/scripts/kitti_publisher.py`.
+- `verify-lidar` and `verify-camera` exercise the built binaries from `install/perception_pipeline_cpp/lib/perception_pipeline_cpp/`.
+- `verify-projections` and `verify-fusion` run `colcon test --packages-select perception_pipeline_cpp`.
 
-If port `8765` is already in use, override it:
+## Current Follow-up Work
 
-```bash
-FOXGLOVE_PORT=8766 pixi run foxglove
-```
-
-## Verification Scripts
-
-**`pixi run verify-env`** — Run after `pixi install`. Checks:
-- Python ≥ 3.12 and ROS 2 Jazzy are active
-- All required ROS message packages are importable
-- ML/vision stack (NumPy, OpenCV, Open3D, YOLOv8, SciPy) is installed
-- Workspace scaffold (launch files, config, scripts) is complete
-- `calibration.yaml` has required sections
-
-**`pixi run verify-publisher`** — Run after `pixi run build`. Checks:
-- `kitti_publisher_node.py` exists and entry point is registered
-- `_bin_to_pointcloud2` and `_png_to_image` conversion utilities are correct
-- Node instantiation and frame publishing work without a live ROS daemon
-- (Optional) Real KITTI sequence layout when `KITTI_SEQ=<path>` is set
-
-## ROS 2 Topics
-
-| Topic | Type | Description |
-|-------|------|-------------|
-| `/camera/image_raw` | `sensor_msgs/Image` | Left color camera frames (RGB8, 1242×375) |
-| `/lidar/points` | `sensor_msgs/PointCloud2` | Velodyne HDL-64 point clouds (x, y, z, intensity) |
-
-Both publishers use **BEST_EFFORT** QoS with history depth 5, matching real sensor driver conventions.
-
-## Dependencies
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| ROS 2 Jazzy | — | Middleware, message types, colcon build |
-| Python | 3.12 | Runtime |
-| OpenCV / cv2 | ≥ 4.7 | Image I/O and detector visualization |
-| Open3D | ≥ 0.17 | 3D point cloud processing (future nodes) |
-| ultralytics | ≥ 8.0 | YOLOv8 object detection (future nodes) |
-| NumPy | ≥ 1.24, < 2.0 | Array operations |
-| Pixi | — | Environment and task management |
+- Add end-to-end RViz2 / KITTI validation documentation and screenshots.
+- Profile per-stage latency in the C++ nodes.
+- Continue polishing platform-specific startup guidance for macOS vs Linux GPU backends.
 
 ## License
 

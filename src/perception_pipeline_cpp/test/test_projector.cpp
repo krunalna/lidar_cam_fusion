@@ -14,7 +14,7 @@
  *   u, v   = p[0]/p[2], p[1]/p[2]
  *
  * Run with:
- *   pixi run build-cpp -- --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+ *   pixi run build
  *   colcon test --packages-select perception_pipeline_cpp
  */
 
@@ -118,7 +118,7 @@ TEST(ProjectorTest, PointAheadProjectsIntoImage)
     EXPECT_LT(px.v, 375.f);
 }
 
-TEST(ProjectorTest, PointAheadMatchesPythonReference)
+TEST(ProjectorTest, PointAheadMatchesReference)
 {
     // Hand-computed KITTI P2 reference for P_velo = [10, 0, 0]:
     //   P_cam = T @ P_velo

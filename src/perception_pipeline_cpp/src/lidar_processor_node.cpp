@@ -12,7 +12,7 @@
  *   /lidar/ground_plane    sensor_msgs/PointCloud2   ground points (debug)
  *
  * Parameters: roi_x_min/max, roi_y_min/max, roi_z_min/max, voxel_size,
- *             ransac_dist, ransac_iter, max_depth  (same defaults as Python node)
+ *             ransac_dist, ransac_iter, max_depth
  */
 
 #include <chrono>

@@ -1,277 +1,140 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file gives repository-specific guidance for coding agents working in this workspace.
 
 ## What This Project Is
 
-A **ROS 2 LiDAR-Camera fusion perception pipeline** that runs entirely on KITTI dataset playback — no physical sensors or model training required. YOLOv8 runs pre-trained inference; fusion logic is pure projection geometry.
+A single-package ROS 2 Jazzy LiDAR-camera fusion pipeline built around KITTI playback.
 
-The pipeline exists in two implementations: a **Python** package (`perception_pipeline`) and a **C++** package (`perception_pipeline_cpp`).
+- ROS package: `perception_pipeline_cpp`
+- Dataset source: KITTI raw sequences
+- 2D detector runtime: ONNX Runtime with YOLOv8 ONNX export
+- LiDAR preprocessing: PCL
+- Projection + fusion: Eigen/OpenCV + custom C++ logic
+- KITTI publisher: Python node installed by the same package
 
 ## Current Status
 
-### Python pipeline (`perception_pipeline`)
-
 | Phase | Description | Status |
 |---|---|---|
-| 1 | Environment & workspace setup (Pixi + ROS 2 Jazzy) | Done |
-| 2 | KITTI publisher node (`/camera/image_raw`, `/lidar/points`) | Done |
-| 3 | LiDAR processor node (ROI → voxel → distance → RANSAC ground removal) | Done |
-| 4 | Camera detector node (YOLOv8 → `/detections_2d`) | Done |
-| 5 | Calibration utilities + projection math | Planned |
-| 6 | Fusion node (frustum-based → `/detections_3d_fused`) | Planned |
-| 7 | Visualization (RViz2) + KITTI validation | Planned |
+| 2 | KITTI publisher (`kitti_publisher`) | Done |
+| 3 | LiDAR preprocessing (`lidar_processor_cpp`) | Done |
+| 4 | Camera detection (`camera_detector_cpp`) | Done |
+| 5 | Calibration + projection utilities | Done |
+| 6 | Fusion node (`fusion_node_cpp`) | Done |
+| 7 | RViz2 / KITTI validation polish | Planned |
+| Extra | C++ profiling | Planned |
 
-### C++ pipeline (`perception_pipeline_cpp`)
-
-| Phase | Description | Status |
-|---|---|---|
-| 2 | KITTI publisher | Reuses Python node |
-| 3 | `lidar_processor_cpp` — PCL: CropBox → VoxelGrid → distance → RANSAC | Done |
-| 4 | `camera_detector_cpp` — ONNX Runtime + custom NMS | Done |
-| 5 | Calibration + projection (C++) | Planned |
-| 6 | Fusion node (C++) | Planned |
-
-## Node Graph
-
-```
-/camera/image_raw ──► [Camera Detector Node] ──► /detections_2d
-                                                        │
-                                                        ▼
-                                                  [Fusion Node] ──► /detections_3d_fused
-                                                        ▲
-/lidar/points ──────► [LiDAR Processor Node] ──► /lidar/filtered
-```
-
-## Environment
-
-Uses **Pixi** (Python 3.12 + ROS 2 Jazzy via conda). Prefix all commands with `pixi run` unless the environment is manually activated.
-
-### First-time setup
+## Canonical Commands
 
 ```bash
-# 1. Install Pixi (if not already installed)
-curl -fsSL https://pixi.sh/install.sh | bash
-# Restart terminal or: source ~/.bashrc
-
-# 2. Install the environment
 pixi install
-
-# 3. Enter the Pixi environment
-pixi shell
-
-# 4. Build the ROS 2 workspace
-pixi run build
-
-# 5. Activate ROS + colcon overlay
-. scripts/activate_ros.sh
-```
-
-`config/cyclonedds.xml` suppresses DDS thread-affinity noise; `activate_ros.sh` exports `CYCLONEDDS_URI` automatically.
-
-## Common Commands
-
-### Python pipeline
-
-```bash
-pixi run build                            # colcon build --symlink-install
-pixi run verify-env                       # check Python 3.12+, ROS 2 Jazzy, all deps
-pixi run verify-publisher                # KITTI publisher: imports, conversion, ROS dry-run
-pixi run verify3                          # LiDAR processor: preprocessing stages, ROS dry-run
-pixi run verify_camera_detector           # camera detector: YOLOv8 inference dry-run
-
-pixi run download-kitti                   # default: 2011_09_26 seq 0001 (~380 MB)
-pixi run download-kitti -- --list
-pixi run download-kitti -- --sequence 0005
-
-pixi run play-bag                         # requires BAG_PATH env var
-pixi run foxglove                         # Foxglove bridge on FOXGLOVE_PORT (default 8765)
-```
-
-### C++ pipeline
-
-```bash
-pixi run export-onnx                      # export yolov8n.pt → models/yolov8n.onnx (one-time)
-pixi run build-cpp                        # build perception_pipeline_cpp only
-pixi run build-all                        # build all packages
-
-pixi run verify-cpp-lidar                 # lidar_processor_cpp: source + build + ROS dry-run
-pixi run verify-cpp-camera                # camera_detector_cpp: source + build + model + ROS dry-run
-```
-
-## Launching the Pipeline
-
-### Python pipeline (first time)
-
-```bash
-# 1. Download KITTI data (one-time, ~380 MB)
 pixi run download-kitti
-
-# 2. Build
-pixi run build
-
-# 3. Launch
-KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync pixi run launch
-```
-
-### C++ pipeline (first time)
-
-```bash
-# 1. Download KITTI data (one-time, if not already done)
-pixi run download-kitti
-
-# 2. Export ONNX model (one-time)
 pixi run export-onnx
+pixi run build
 
-# 3. Build
-pixi run build-all
+pixi run verify-env
+pixi run verify-publisher
+pixi run verify-lidar
+pixi run verify-camera
+pixi run verify-projections
+pixi run verify-fusion
 
-# 4. Launch
 KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync \
-  YOLO_ONNX=$(pwd)/models/yolov8n.onnx \
-  pixi run launch-cpp
+YOLO_ONNX=$(pwd)/models/yolov8n.onnx \
+pixi run launch
 ```
 
-### Launch with options
+Optional:
 
 ```bash
-# Custom frame rate, no loop (Python)
-KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync \
-  FRAME_RATE=20 LOOP=false pixi run launch
-
-# Custom frame rate, no loop (C++)
-KITTI_SEQ=$(pwd)/data/kitti/2011_09_26/2011_09_26_drive_0001_sync \
-  YOLO_ONNX=$(pwd)/models/yolov8n.onnx \
-  FRAME_RATE=20 LOOP=false pixi run launch-cpp
+pixi run play-bag
+pixi run foxglove
 ```
 
-### Expected startup logs (healthy)
+## Launch Surface
 
-```
-[kitti_publisher-1]   KittiPublisher ready — 114 frames @ 10.0 Hz  loop=True
-[lidar_processor-2]   LidarProcessor ready — waiting for /lidar/points
-[camera_detector-3]   ONNX model loaded.
-[camera_detector-3]   CameraDetector ready — waiting for /camera/image_raw
-```
+The supported full-pipeline launch file is:
 
-> Note: CycloneDDS `Protocol family not supported` errors on macOS are harmless — thread affinity is a Linux-only feature.
+- `src/perception_pipeline_cpp/launch/fusion_pipeline_cpp.launch.py`
 
-## ROS 2 Topics
+Environment variables used by launch:
 
-| Topic | Type | Node | QoS |
-|---|---|---|---|
-| `/camera/image_raw` | `sensor_msgs/Image` (rgb8) | kitti_publisher | best-effort, depth 1 |
-| `/lidar/points` | `sensor_msgs/PointCloud2` | kitti_publisher | best-effort, depth 1 |
-| `/lidar/filtered` | `sensor_msgs/PointCloud2` | lidar_processor | reliable, depth 5 |
-| `/lidar/ground_plane` | `sensor_msgs/PointCloud2` | lidar_processor | reliable, depth 5 |
-| `/detections_2d` | `vision_msgs/Detection2DArray` | camera_detector | reliable, depth 5 |
-| `/camera/detections_viz` | `sensor_msgs/Image` (rgb8) | camera_detector | reliable, depth 1 |
-| `/detections_3d_fused` | `vision_msgs/Detection3DArray` | fusion_node | *(planned)* |
+- `KITTI_SEQ`
+- `FRAME_RATE`
+- `LOOP`
+- `YOLO_ONNX`
+- `CALIB_FILE` (optional override)
 
-## Key Source Files
+## Key Files
 
-### Python (`src/perception_pipeline/perception_pipeline/`)
-- `kitti_publisher_node.py` — reads KITTI `.bin`/`.png` files, publishes at configurable rate
-- `lidar_processor_node.py` — `LidarPreprocessor` (numpy, no ROS) wrapped by `LidarProcessorNode`; intensity preserved through custom numpy voxel grid
-- `camera_detector_node.py` — `CameraDetector` (ultralytics YOLOv8) wrapped by `CameraDetectorNode`; publishes viz to `/camera/detections_viz`
-- `config/calibration.yaml` — KITTI camera intrinsics (K), 4×4 Velodyne→camera extrinsic (T)
-- `launch/fusion_pipeline.launch.py` — controlled via `KITTI_SEQ`, `FRAME_RATE`, `LOOP` env vars
+- `src/perception_pipeline_cpp/scripts/kitti_publisher.py`
+  Python KITTI replay node, installed as executable `kitti_publisher`.
+- `src/perception_pipeline_cpp/config/calibration.yaml`
+  Canonical camera intrinsics and LiDAR-to-camera extrinsic.
+- `src/perception_pipeline_cpp/include/perception_pipeline_cpp/lidar_preprocessor.hpp`
+  LiDAR preprocessing public API.
+- `src/perception_pipeline_cpp/src/lidar_preprocessor.cpp`
+  CropBox -> VoxelGrid -> distance filter -> RANSAC implementation.
+- `src/perception_pipeline_cpp/include/perception_pipeline_cpp/camera_detector.hpp`
+  Camera detector public API with ONNX Runtime hidden behind pimpl.
+- `src/perception_pipeline_cpp/src/camera_detector.cpp`
+  Letterbox, tensor prep, inference, decode, and NMS.
+- `src/perception_pipeline_cpp/include/perception_pipeline_cpp/calibration.hpp`
+  YAML-backed calibration data loader.
+- `src/perception_pipeline_cpp/include/perception_pipeline_cpp/projector.hpp`
+  LiDAR-to-image projection utilities.
+- `src/perception_pipeline_cpp/include/perception_pipeline_cpp/fusion_engine.hpp`
+  Pure C++ frustum fusion API.
+- `src/perception_pipeline_cpp/src/fusion_node.cpp`
+  ROS 2 wrapper around synchronized fusion and debug outputs.
 
-### C++ (`src/perception_pipeline_cpp/`)
-- `include/perception_pipeline_cpp/lidar_preprocessor.hpp` — `LidarPreprocessorConfig`, `LidarPreprocessorResult`, `LidarPreprocessor`
-- `src/lidar_preprocessor.cpp` — PCL pipeline: CropBox → VoxelGrid (intensity averaged) → distance filter → RANSAC
-- `src/lidar_processor_node.cpp` — ROS wrapper; `pc2_to_floats()` / `floats_to_pc2()` handle arbitrary PointCloud2 field layouts
-- `include/perception_pipeline_cpp/camera_detector.hpp` — `CameraDetectorConfig`, `Detection`, `LetterboxInfo`, `CameraDetector` (pimpl, no ONNX headers exposed)
-- `src/camera_detector.cpp` — letterbox preprocess, ONNX Runtime inference, NMS postprocess; decodes `(1, 84, 8400)` output tensor
-- `src/camera_detector_node.cpp` — ROS wrapper; publishes `Detection2DArray` + viz image
-- `launch/fusion_pipeline_cpp.launch.py` — controlled via `KITTI_SEQ`, `FRAME_RATE`, `LOOP`, `YOLO_ONNX` env vars
+## Topic Graph
 
-## C++ Camera Detector — ONNX Output Format
-
-YOLOv8n ONNX output tensor shape: `(1, 84, 8400)`
-- **Rows 0–3**: `cx, cy, w, h` in letterboxed 640×640 space
-- **Rows 4–83**: 80 COCO class scores (no sigmoid — raw logits from ultralytics export)
-- **8400 anchors**: product of the three detection heads (80×80 + 40×40 + 20×20)
-
-Postprocessing: confidence filter → per-class greedy NMS (IoU threshold 0.45) → invert letterbox → clip to image bounds.
-
-Export with: `pixi run export-onnx` → `models/yolov8n.onnx`
-
-## Projection Math (Phase 5)
-
-Core equation: `p_image = K × [R|t] × P_lidar`
-
-- **K** (3×3): camera intrinsics — focal length + principal point, from `calibration.yaml`
-- **T** (4×4): extrinsic transform Velodyne → rectified camera frame, from `calibration.yaml`
-- Use this to project LiDAR points onto the image plane; points inside a YOLO bbox are associated with that detection
-
-## Fusion Algorithm (Phase 6)
-
-Frustum-based association using `message_filters.ApproximateTimeSynchronizer`:
-1. For each YOLO 2D bbox, back-project into a 3D frustum
-2. Extract LiDAR points from `/lidar/filtered` that fall inside the frustum
-3. Fit a 3D bounding box (min/max or cluster) over extracted points
-4. Attach YOLO class label + confidence → publish `vision_msgs/Detection3DArray`
-
-## LidarPreprocessor Pipeline Order
-
-Both Python and C++ implement the same 4-stage pipeline:
-
-1. ROI crop (forward-facing box filter) — PCL `CropBox` in C++
-2. Voxel downsampling — custom numpy in Python (intensity averaged); PCL `VoxelGrid` in C++ (intensity averaged)
-3. Distance filter (Euclidean norm ≤ `max_depth`)
-4. RANSAC ground removal — PCL `SACSegmentation` in C++
-
-Returns `filtered` (N×4) and `ground` (K×4), both with `x, y, z, intensity`.
-
-## KITTI Data Layout
-
-```
-<sequence_path>/
-  image_02/data/*.png            # left color camera frames
-  velodyne_points/data/*.bin     # float32 x/y/z/intensity per point
+```text
+/camera/image_raw -> camera_detector_cpp -> /detections_2d
+/lidar/points -> lidar_processor_cpp -> /lidar/filtered
+/detections_2d + /lidar/filtered -> fusion_node_cpp -> /detections_3d_fused
 ```
 
-Default path (gitignored): `data/kitti/2011_09_26/2011_09_26_drive_0001_sync/`
+Additional debug outputs:
 
-## Entry Points
+- `/lidar/ground_plane`
+- `/camera/detections_viz`
+- `/detections_3d_markers`
+- `/fusion/debug_image`
 
-### Python (`setup.py`)
-- `kitti_publisher` → `perception_pipeline.kitti_publisher_node:main`
-- `lidar_processor` → `perception_pipeline.lidar_processor_node:main`
-- `camera_detector` → `perception_pipeline.camera_detector_node:main`
-- `fusion_node` — defined, not yet implemented
+## Verification Scripts
 
-### C++ (`CMakeLists.txt`)
-- `lidar_processor_cpp` — Phase 3 C++ node
-- `camera_detector_cpp` — Phase 4 C++ node (requires `YOLO_ONNX`)
+- `scripts/verify_env.py`
+- `scripts/verify_publisher.py`
+- `scripts/verify_lidar.py`
+- `scripts/verify_camera.py`
+- `scripts/verify_projections.py`
+- `scripts/verify_fusion.py`
 
-## TODO
+Shared PointCloud2 helpers for verification live in:
 
-- [ ] **C++ profiling** — measure per-stage frame budget using `std::chrono::steady_clock` timestamps around `preprocess()`, ONNX inference, and `postprocess()` in `camera_detector.cpp`, and around each PCL stage (`CropBox`, `VoxelGrid`, RANSAC) in `lidar_preprocessor.cpp`. Key suspects: RANSAC (100 iter × ~9k points), ONNX postprocess inner loop (80 classes × 8400 anchors = 672k iterations/frame), `pc2_to_floats` per-point branch on 115k points. Build with `RelWithDebInfo` and use macOS Instruments (`xcrun xctrace`) or inline timing logs for stage-level breakdown.
-- [ ] Phase 5 Python — Calibration utilities + projection math (`utils/calibration.py`, `utils/projection.py`)
-- [ ] Phase 5 C++ — Calibration utilities + projection math (after Python Phase 5)
-- [ ] Phase 6 Python — Fusion node (`fusion_node.py`)
-- [ ] Phase 6 C++ — Fusion node (`fusion_node_cpp`)
-- [ ] Phase 7 — RViz2 visualization + KITTI validation
+- `scripts/pc2_helpers.py`
 
-## macOS Build Notes (C++)
+## Build / Packaging Notes
 
-Five macOS-specific workarounds are in `CMakeLists.txt`:
-- **libatomic stub**: clang has atomic built-in; an empty `libatomic.a` stub satisfies robostack's `-latomic` flag
-- **libpython3.12 preload**: `rosidl_generator_py` uses flat-namespace Python symbol lookup; linking libpython explicitly ensures `_PyExc_*` symbols are available before the dylib loads
-- **numpy `_core/include` stub**: rclcpp's cmake config lists `numpy/_core/include` in its `INTERFACE_INCLUDE_DIRECTORIES`; after a fresh pixi install the directory may not exist — CMakeLists.txt creates it automatically
-- **ONNX Runtime headers**: conda-forge's `onnxruntime` package for macOS is Python-only (no C++ headers). CMakeLists.txt uses `FetchContent` to download the matching official prebuilt (version queried from the Python package) on first configure. Headers land flat in `include/` so the include is `#include <onnxruntime_cxx_api.h>`
-- **ONNX Runtime CoreML EP (GPU)**: conda-forge's `onnxruntime` dylib is CPU-only — it does not include the CoreML execution provider. CMakeLists.txt therefore uses the `.dylib` from the GitHub official prebuilt (which includes CoreML EP) instead of the one in `site-packages/onnxruntime/capi/`. A post-build command copies the dylib into the binary directory so `@loader_path` resolution works. On startup, `camera_detector_cpp` logs the active provider: `CoreML` = default CoreML compute units (CPUAndGPU); `CPU` = fallback (rebuild required). Note: passing explicit `MLComputeUnits` options throws on this ONNX Runtime version — CoreML EP is invoked with no options.
+- `perception_pipeline_cpp` is an `ament_cmake` package.
+- The package owns both the C++ binaries and the installed Python publisher script.
+- `config/calibration.yaml` is installed into `share/perception_pipeline_cpp/config`.
+- On macOS, CMake provides the `libatomic` stub and explicit `libpython3.12` preload required by RoboStack.
+- ONNX Runtime headers are fetched at configure time to match the Python-installed runtime version.
+- On macOS, the build prefers the official CoreML-enabled ONNX Runtime prebuilt.
 
-## C++ Camera Detector — Execution Provider Priority
+## Important Assumptions
 
-`camera_detector.cpp` selects the best available ONNX Runtime execution provider at runtime:
+- There is no separate legacy Python ROS package anymore.
+- There is no separate Python pipeline to keep in sync.
+- Node behavior should stay stable unless a task explicitly asks for algorithmic changes.
+- The dirty worktree may contain user-owned artifacts such as `models/yolov8n.onnx`; do not revert them.
 
-| Priority | Provider | Platform | Hardware |
-|---|---|---|---|
-| 1 | `CUDAExecutionProvider` | Linux | NVIDIA GPU |
-| 2 | `CoreMLExecutionProvider` | macOS | GPU / Apple Neural Engine (default CoreML compute units) |
-| 3 | CPU | any | CPU fallback |
+## Next Work Worth Doing
 
-The active provider is logged at startup. A `WARN` is emitted if CPU fallback is used.
+- Add profiling around `pc2_to_floats`, PCL stages, ONNX inference, and postprocess.
+- Document end-to-end KITTI validation workflow and expected outputs.
+- Add more launch/runtime guidance for Linux CUDA vs macOS CoreML execution providers.
