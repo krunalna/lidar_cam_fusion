@@ -19,17 +19,30 @@ struct CameraDetector::OrtImpl {
     std::unique_ptr<Ort::Session> session;
     std::string input_name;
     std::string output_name;
+    std::string active_provider;
 
     explicit OrtImpl(const std::string & model_path)
     {
-        // Prefer CUDA; fall back to CPU if the provider is unavailable.
-        try {
+        // Pick the best execution provider available on this machine at runtime.
+        // Priority: CUDA (NVIDIA) > CoreML (Apple) > CPU
+        const auto available = Ort::GetAvailableProviders();
+        const auto has = [&](const char * name) {
+            return std::any_of(available.begin(), available.end(),
+                [name](const std::string & p){ return p == name; });
+        };
+
+        if (has("CUDAExecutionProvider")) {
             OrtCUDAProviderOptions cuda_opts{};
             cuda_opts.device_id = 0;
             opts.AppendExecutionProvider_CUDA(cuda_opts);
-        } catch (const Ort::Exception &) {
-            // CUDA provider not available — running on CPU.
+            active_provider = "CUDA";
+        } else if (has("CoreMLExecutionProvider")) {
+            opts.AppendExecutionProvider("CoreML");
+            active_provider = "CoreML";
+        } else {
+            active_provider = "CPU";
         }
+
         opts.SetIntraOpNumThreads(1);
         opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
         session = std::make_unique<Ort::Session>(env, model_path.c_str(), opts);
@@ -50,6 +63,11 @@ CameraDetector::CameraDetector(const CameraDetectorConfig & cfg)
 }
 
 CameraDetector::~CameraDetector() = default;
+
+const std::string & CameraDetector::active_provider() const
+{
+    return ort_->active_provider;
+}
 
 // ── Preprocess ────────────────────────────────────────────────────────────────
 

@@ -79,6 +79,9 @@ public:
     std::vector<Detection> detect(
         const uint8_t * rgb, int width, int height) const;
 
+    /** Name of the active execution provider: "CUDA", "CoreML", or "CPU". */
+    const std::string & active_provider() const;
+
 private:
     // Letterbox resize + CHW float normalise → (3×640×640) tensor
     std::vector<float> preprocess(

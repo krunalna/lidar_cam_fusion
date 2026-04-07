@@ -100,7 +100,8 @@ public:
             cfg.model_path.c_str(), cfg.conf_threshold, cfg.iou_threshold);
 
         detector_ = std::make_unique<CameraDetector>(cfg);
-        RCLCPP_INFO(get_logger(), "ONNX model loaded.");
+        RCLCPP_INFO(get_logger(), "ONNX model loaded — execution provider: %s",
+            detector_->active_provider().c_str());
 
         // ── QoS ─────────────────────────────────────────────────────────────
         // kitti_publisher publishes /camera/image_raw with RELIABLE depth 5 —
