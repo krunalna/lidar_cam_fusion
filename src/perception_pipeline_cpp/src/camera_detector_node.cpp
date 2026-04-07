@@ -21,6 +21,7 @@
  *   YOLO_ONNX=$(pwd)/models/yolov8n.onnx pixi run launch-cpp
  */
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -100,20 +101,33 @@ public:
             cfg.model_path.c_str(), cfg.conf_threshold, cfg.iou_threshold);
 
         detector_ = std::make_unique<CameraDetector>(cfg);
+
+        const auto & provider = detector_->active_provider();
         RCLCPP_INFO(get_logger(), "ONNX model loaded — execution provider: %s",
-            detector_->active_provider().c_str());
+            provider.c_str());
+
+        if (provider == "CoreML") {
+            RCLCPP_INFO(get_logger(),
+                "GPU acceleration active: CoreML EP will delegate to the "
+                "Apple Neural Engine / GPU on Apple Silicon.");
+        } else if (provider == "CUDA") {
+            RCLCPP_INFO(get_logger(),
+                "GPU acceleration active: CUDA EP running on NVIDIA GPU (device 0).");
+        } else {
+            RCLCPP_WARN(get_logger(),
+                "No GPU acceleration — inference will run on CPU. "
+                "On macOS, ensure the official ONNX Runtime prebuilt (CoreML EP) "
+                "is linked (rebuild with: pixi run build-cpp). "
+                "On Linux, install onnxruntime-gpu for CUDA acceleration.");
+        }
 
         // ── QoS ─────────────────────────────────────────────────────────────
-        // kitti_publisher publishes /camera/image_raw with RELIABLE depth 5 —
-        // subscriber must match or CycloneDDS on macOS silently drops the connection.
-        rclcpp::QoS sub_qos(rclcpp::KeepLast(5));
+        // KeepLast(1) RELIABLE: match the publisher, never queue stale frames.
+        rclcpp::QoS sub_qos(rclcpp::KeepLast(1));
         sub_qos.reliable();
 
         rclcpp::QoS pub_qos(rclcpp::KeepLast(5));
         pub_qos.reliable();
-
-        rclcpp::QoS viz_qos(rclcpp::KeepLast(1));
-        viz_qos.reliable();
 
         // ── Sub / Pub ────────────────────────────────────────────────────────
         sub_ = create_subscription<sensor_msgs::msg::Image>(
@@ -122,6 +136,9 @@ public:
 
         pub_det_ = create_publisher<vision_msgs::msg::Detection2DArray>(
             "/detections_2d", pub_qos);
+
+        rclcpp::QoS viz_qos(rclcpp::KeepLast(1));
+        viz_qos.reliable();
         pub_viz_ = create_publisher<sensor_msgs::msg::Image>(
             "/camera/detections_viz", viz_qos);
 
@@ -129,8 +146,12 @@ public:
     }
 
 private:
+    using Clock = std::chrono::steady_clock;
+
     void on_image(const sensor_msgs::msg::Image::SharedPtr msg)
     {
+        const auto cb_start = Clock::now();
+
         const int W    = static_cast<int>(msg->width);
         const int H    = static_cast<int>(msg->height);
         // Use step (bytes per row) to derive expected data size — handles any row stride
@@ -147,7 +168,6 @@ private:
             RCLCPP_ERROR(get_logger(),
                 "Image data too small: got %zu bytes, need %zu (step=%u h=%d)",
                 msg->data.size(), expected, msg->step, H);
-            // Still publish an empty array so the topic appears live
             vision_msgs::msg::Detection2DArray empty;
             empty.header = msg->header;
             pub_det_->publish(empty);
@@ -155,7 +175,8 @@ private:
             return;
         }
 
-        // Run inference — always publish the result (empty on failure)
+        // ── Inference ───────────────────────────────────────────────────────
+        const auto infer_start = Clock::now();
         std::vector<Detection> dets;
         try {
             dets = detector_->detect(msg->data.data(), W, H);
@@ -163,6 +184,8 @@ private:
             RCLCPP_ERROR(get_logger(), "Inference error on frame %u: %s",
                          frame_count_, e.what());
         }
+        const double infer_ms =
+            std::chrono::duration<double, std::milli>(Clock::now() - infer_start).count();
 
         // First-frame diagnostic: confirm detections are being generated
         if (frame_count_ == 0) {
@@ -200,7 +223,7 @@ private:
         }
         pub_det_->publish(out);
 
-        // ── Visualisation (always publish so Foxglove/RViz can see it) ──────────
+        // ── Visualisation ────────────────────────────────────────────────────
         {
             cv::Mat canvas(H, W, CV_8UC3, const_cast<uint8_t *>(msg->data.data()));
             cv::Mat annotated = canvas.clone();
@@ -218,10 +241,36 @@ private:
             pub_viz_->publish(viz);
         }
 
+        // ── Timing ──────────────────────────────────────────────────────────
+        const double proc_ms =
+            std::chrono::duration<double, std::milli>(Clock::now() - cb_start).count();
+
+        if (last_cb_time_.time_since_epoch().count() > 0) {
+            const double dt_s =
+                std::chrono::duration<double>(cb_start - last_cb_time_).count();
+            const double hz = (dt_s > 0.0) ? 1.0 / dt_s : 0.0;
+            rolling_hz_       = kAlpha * hz       + (1.0 - kAlpha) * rolling_hz_;
+            rolling_proc_ms_  = kAlpha * proc_ms  + (1.0 - kAlpha) * rolling_proc_ms_;
+            rolling_infer_ms_ = kAlpha * infer_ms + (1.0 - kAlpha) * rolling_infer_ms_;
+        } else {
+            rolling_proc_ms_  = proc_ms;
+            rolling_infer_ms_ = infer_ms;
+        }
+        last_cb_time_ = cb_start;
+
         ++frame_count_;
-        if (frame_count_ <= 3 || frame_count_ % 20 == 0) {
-            RCLCPP_INFO(get_logger(), "Frame %u | %zu detection(s)",
-                        frame_count_, dets.size());
+        // Log first 3 frames, then every 30; always warn if slow
+        const bool slow = proc_ms > 80.0;  // >80 ms risks dropping frames at 10 Hz
+        if (frame_count_ <= 3 || frame_count_ % 30 == 0 || slow) {
+            if (slow) {
+                RCLCPP_WARN(get_logger(),
+                    "Frame %4u | %5.1f Hz | proc=%6.1f ms  infer=%6.1f ms [SLOW] | %zu det(s)",
+                    frame_count_, rolling_hz_, proc_ms, infer_ms, dets.size());
+            } else {
+                RCLCPP_INFO(get_logger(),
+                    "Frame %4u | %5.1f Hz | proc=%6.1f ms  infer=%6.1f ms | %zu det(s)",
+                    frame_count_, rolling_hz_, proc_ms, infer_ms, dets.size());
+            }
         }
     }
 
@@ -231,6 +280,11 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr            pub_viz_;
     float    conf_threshold_{0.5f};
     uint32_t frame_count_{0};
+    Clock::time_point last_cb_time_{};
+    double rolling_hz_{0.0};
+    double rolling_proc_ms_{0.0};
+    double rolling_infer_ms_{0.0};
+    static constexpr double kAlpha = 0.2;  // EMA smoothing factor
 };
 
 }  // namespace perception_pipeline_cpp

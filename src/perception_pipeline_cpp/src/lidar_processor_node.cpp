@@ -15,6 +15,7 @@
  *             ransac_dist, ransac_iter, max_depth  (same defaults as Python node)
  */
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -132,8 +133,12 @@ public:
   }
 
 private:
+  using Clock = std::chrono::steady_clock;
+
   void on_pointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
   {
+    const auto cb_start = Clock::now();
+
     const uint32_t n_points = msg->width * msg->height;
     if (n_points == 0) return;
 
@@ -148,11 +153,36 @@ private:
     pub_filtered_->publish(floats_to_pc2(result.filtered, hdr));
     pub_ground_->publish(floats_to_pc2(result.ground, hdr));
 
+    // ── Timing ──────────────────────────────────────────────────────────────
+    const double proc_ms =
+      std::chrono::duration<double, std::milli>(Clock::now() - cb_start).count();
+
+    if (last_cb_time_.time_since_epoch().count() > 0) {
+      const double dt_s =
+        std::chrono::duration<double>(cb_start - last_cb_time_).count();
+      const double hz = (dt_s > 0.0) ? 1.0 / dt_s : 0.0;
+      rolling_hz_      = kAlpha * hz      + (1.0 - kAlpha) * rolling_hz_;
+      rolling_proc_ms_ = kAlpha * proc_ms + (1.0 - kAlpha) * rolling_proc_ms_;
+    } else {
+      rolling_proc_ms_ = proc_ms;
+    }
+    last_cb_time_ = cb_start;
+
     ++frame_count_;
-    if (frame_count_ % 20 == 0) {
-      RCLCPP_INFO(get_logger(),
-        "Frame %u | in=%6u  roi=%6u  voxel=%6u  ground=%5u  out=%6u",
-        frame_count_, s.n_input, s.n_roi, s.n_voxel, s.n_ground, s.n_output);
+    // Log first 3 frames, then every 30; always warn if processing is slow
+    const bool slow = proc_ms > 80.0;  // >80 ms risks dropping frames at 10 Hz
+    if (frame_count_ <= 3 || frame_count_ % 30 == 0 || slow) {
+      if (slow) {
+        RCLCPP_WARN(get_logger(),
+          "Frame %4u | %5.1f Hz | proc=%6.1f ms [SLOW] | in=%6u roi=%6u voxel=%6u out=%6u",
+          frame_count_, rolling_hz_, proc_ms,
+          s.n_input, s.n_roi, s.n_voxel, s.n_output);
+      } else {
+        RCLCPP_INFO(get_logger(),
+          "Frame %4u | %5.1f Hz | proc=%6.1f ms | in=%6u roi=%6u voxel=%6u out=%6u",
+          frame_count_, rolling_hz_, proc_ms,
+          s.n_input, s.n_roi, s.n_voxel, s.n_output);
+      }
     }
   }
 
@@ -160,7 +190,11 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr    sub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr       pub_filtered_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr       pub_ground_;
-  uint32_t frame_count_{0};
+  uint32_t   frame_count_{0};
+  Clock::time_point last_cb_time_{};
+  double rolling_hz_{0.0};
+  double rolling_proc_ms_{0.0};
+  static constexpr double kAlpha = 0.2;  // EMA smoothing factor
 };
 
 }  // namespace perception_pipeline_cpp

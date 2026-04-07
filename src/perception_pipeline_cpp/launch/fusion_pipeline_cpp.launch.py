@@ -117,9 +117,9 @@ def generate_launch_description():
         parameters=[{
             "calibration_file":    LaunchConfiguration("calibration_file"),
             "min_cluster_points":  5,
-            "sync_slop":           0.1,
+            "sync_slop":           0.5,
             "publish_markers":     True,
-            "publish_debug_image": True,
+            "publish_debug_image": False,
         }],
         output="screen",
         emulate_tty=True,

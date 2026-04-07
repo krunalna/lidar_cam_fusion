@@ -4,6 +4,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <opencv2/imgproc.hpp>
@@ -37,7 +38,14 @@ struct CameraDetector::OrtImpl {
             opts.AppendExecutionProvider_CUDA(cuda_opts);
             active_provider = "CUDA";
         } else if (has("CoreMLExecutionProvider")) {
-            opts.AppendExecutionProvider("CoreML");
+            // MLComputeUnitsAll = 2: enables CPU + GPU + Apple Neural Engine.
+            // Without explicit options CoreML defaults to CPUAndGPU and often
+            // falls back to CPU for unsupported ops. Setting All lets the ANE
+            // handle the bulk of the model and improves GPU utilization.
+            const std::unordered_map<std::string, std::string> coreml_opts{
+                {"MLComputeUnits", "2"}   // 0=CPUOnly 1=CPUAndGPU 2=All 3=CPUAndANE
+            };
+            opts.AppendExecutionProvider("CoreML", coreml_opts);
             active_provider = "CoreML";
         } else {
             active_provider = "CPU";

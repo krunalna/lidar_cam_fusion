@@ -28,6 +28,7 @@
  *   publish_debug_image    (bool)   Publish projected-LiDAR debug image [default: true]
  */
 
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -103,19 +104,19 @@ static std_msgs::msg::ColorRGBA class_colour(const std::string & cls)
 }
 
 // BGR color for a projected LiDAR point based on Velodyne-frame distance.
-// Jet-like: near (< 10 m) = red, mid (20 m) = yellow, far (> 40 m) = blue.
+// green (near) → yellow (mid) → red (far), no heap allocation.
 static cv::Scalar depth_to_bgr(float dist_m)
 {
-    // Normalise 0–50 m → 0–1, then map hue 0° (red) → 240° (blue) inverted:
-    // near = 0° (red), far = 240° (blue)
-    const float t      = std::min(std::max(dist_m / 50.f, 0.f), 1.f);
-    const float hue    = (1.f - t) * 120.f;   // 120°=green at mid, 0°=red near
-    cv::Mat hsv(1, 1, CV_8UC3,
-        cv::Scalar(static_cast<uint8_t>(hue / 2.f), 255, 255));  // OpenCV hue 0-180
-    cv::Mat bgr;
-    cv::cvtColor(hsv, bgr, cv::COLOR_HSV2BGR);
-    const auto * px = bgr.ptr<uint8_t>(0);
-    return cv::Scalar(px[0], px[1], px[2]);
+    const float t = std::min(std::max(dist_m / 50.f, 0.f), 1.f);
+    uint8_t r, g;
+    if (t < 0.5f) {
+        r = static_cast<uint8_t>(t * 2.f * 255.f);   // green → yellow
+        g = 255;
+    } else {
+        r = 255;                                        // yellow → red
+        g = static_cast<uint8_t>((1.f - (t - 0.5f) * 2.f) * 255.f);
+    }
+    return cv::Scalar(0, g, r);  // BGR
 }
 
 // ── Node ─────────────────────────────────────────────────────────────────────
@@ -136,7 +137,7 @@ public:
         declare_parameter<int>        ("min_cluster_points",  5);
         declare_parameter<double>     ("depth_gate_min_m",    4.0);
         declare_parameter<double>     ("depth_gate_scale",    0.20);
-        declare_parameter<double>     ("sync_slop",           0.1);
+        declare_parameter<double>     ("sync_slop",           0.5);
         declare_parameter<bool>       ("publish_markers",     true);
         declare_parameter<bool>       ("publish_debug_image", true);
 
@@ -221,10 +222,14 @@ public:
 private:
     // ── Synchronized callback ─────────────────────────────────────────────────
 
+    using Clock = std::chrono::steady_clock;
+
     void on_sync(
         const Detection2DArray::ConstSharedPtr & det_msg,
         const PointCloud2::ConstSharedPtr      & pts_msg)
     {
+        const auto t0 = Clock::now();
+
         // ── Convert Detection2DArray → vector<BBox2D> ────────────────────────
         std::vector<BBox2D> bboxes;
         bboxes.reserve(det_msg->detections.size());
@@ -244,9 +249,11 @@ private:
         // ── Convert PointCloud2 → flat float buffer ──────────────────────────
         const auto pts   = pc2_to_floats(*pts_msg);
         const uint32_t n = pts_msg->width * pts_msg->height;
+        const auto t1 = Clock::now();
 
         // ── Fuse ─────────────────────────────────────────────────────────────
         const auto result = engine_->fuse(bboxes, pts.data(), n, *projector_);
+        const auto t2 = Clock::now();
 
         // ── Publish Detection3DArray (always) ────────────────────────────────
         {
@@ -280,13 +287,44 @@ private:
         if (publish_debug_image_) {
             publish_debug_image(det_msg->header, pts.data(), n, bboxes);
         }
+        const auto t3 = Clock::now();
+
+        // ── Timing ───────────────────────────────────────────────────────────
+        const double deser_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        const double fuse_ms  = std::chrono::duration<double, std::milli>(t2 - t1).count();
+        const double pub_ms   = std::chrono::duration<double, std::milli>(t3 - t2).count();
+        const double total_ms = std::chrono::duration<double, std::milli>(t3 - t0).count();
+
+        if (last_cb_time_.time_since_epoch().count() > 0) {
+            const double dt_s = std::chrono::duration<double>(t0 - last_cb_time_).count();
+            const double hz = (dt_s > 0.0) ? 1.0 / dt_s : 0.0;
+            rolling_hz_    = kAlpha * hz    + (1.0 - kAlpha) * rolling_hz_;
+            rolling_pub_ms_ = kAlpha * pub_ms + (1.0 - kAlpha) * rolling_pub_ms_;
+        } else {
+            rolling_pub_ms_ = pub_ms;
+        }
+        last_cb_time_ = t0;
 
         ++frame_count_;
-        if (frame_count_ <= 3 || frame_count_ % 20 == 0) {
-            RCLCPP_INFO(get_logger(),
-                "Frame %u | 2D=%zu  LiDAR=%u pts  → 3D=%zu detection(s)",
-                frame_count_,
-                det_msg->detections.size(), n, result.detections.size());
+        const bool slow = total_ms > 80.0;
+        if (frame_count_ <= 3 || frame_count_ % 30 == 0 || slow) {
+            if (slow) {
+                RCLCPP_WARN(get_logger(),
+                    "Frame %4u | %5.1f Hz | total=%6.1f ms "
+                    "(deser=%5.1f  fuse=%5.1f  pub/dbg=%5.1f) [SLOW] "
+                    "| 2D=%zu LiDAR=%u → 3D=%zu",
+                    frame_count_, rolling_hz_, total_ms,
+                    deser_ms, fuse_ms, pub_ms,
+                    det_msg->detections.size(), n, result.detections.size());
+            } else {
+                RCLCPP_INFO(get_logger(),
+                    "Frame %4u | %5.1f Hz | total=%6.1f ms "
+                    "(deser=%5.1f  fuse=%5.1f  pub/dbg=%5.1f) "
+                    "| 2D=%zu LiDAR=%u → 3D=%zu",
+                    frame_count_, rolling_hz_, total_ms,
+                    deser_ms, fuse_ms, pub_ms,
+                    det_msg->detections.size(), n, result.detections.size());
+            }
         }
     }
 
@@ -377,16 +415,27 @@ private:
         cv::cvtColor(rgb, canvas, cv::COLOR_RGB2BGR);
 
         // ── Draw projected LiDAR points (depth-coloured dots) ────────────────
+        // Direct pixel write (3×3 splat) avoids per-point cv::circle overhead.
         for (uint32_t i = 0; i < n_points; ++i) {
-            const float * p    = points_xyzi + i * 4;
-            const auto    px   = projector_->project(p[0], p[1], p[2]);
+            const float * p  = points_xyzi + i * 4;
+            const auto    px = projector_->project(p[0], p[1], p[2]);
             if (!px.valid) continue;
 
-            const float dist   = std::sqrt(p[0]*p[0] + p[1]*p[1] + p[2]*p[2]);
+            const int u = static_cast<int>(px.u);
+            const int v = static_cast<int>(px.v);
+            if (u < 1 || u >= W - 1 || v < 1 || v >= H - 1) continue;
+
+            const float dist = std::sqrt(p[0]*p[0] + p[1]*p[1] + p[2]*p[2]);
             const cv::Scalar c = depth_to_bgr(dist);
-            cv::circle(canvas,
-                cv::Point(static_cast<int>(px.u), static_cast<int>(px.v)),
-                2, c, cv::FILLED);
+            const cv::Vec3b  pix(
+                static_cast<uint8_t>(c[0]),
+                static_cast<uint8_t>(c[1]),
+                static_cast<uint8_t>(c[2]));
+
+            // 3×3 splat so points are visible at normal zoom
+            for (int dv = -1; dv <= 1; ++dv)
+                for (int du = -1; du <= 1; ++du)
+                    canvas.at<cv::Vec3b>(v + dv, u + du) = pix;
         }
 
         // ── Draw 2D detection bboxes + labels ────────────────────────────────
@@ -449,6 +498,12 @@ private:
     bool     publish_markers_{true};
     bool     publish_debug_image_{true};
     uint32_t frame_count_{0};
+
+    // Timing
+    Clock::time_point last_cb_time_{};
+    double rolling_hz_{0.0};
+    double rolling_pub_ms_{0.0};
+    static constexpr double kAlpha = 0.2;
 };
 
 }  // namespace perception_pipeline_cpp

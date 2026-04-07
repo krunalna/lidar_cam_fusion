@@ -106,15 +106,46 @@ FetchContent_Declare(ort_prebuilt
 )
 FetchContent_GetProperties(ort_prebuilt)
 if(NOT ort_prebuilt_POPULATED)
-  message(STATUS "Downloading ONNX Runtime ${ORT_VERSION} headers (one-time) ...")
+  message(STATUS "Downloading ONNX Runtime ${ORT_VERSION} prebuilt (one-time) ...")
   FetchContent_Populate(ort_prebuilt)
 endif()
 
-# Step 4 — create import target
+# Step 4a — on macOS, prefer the official prebuilt dylib over conda-forge.
+# The conda-forge onnxruntime package is CPU-only (no CoreML EP).
+# The GitHub release prebuilt includes the CoreML execution provider, which
+# delegates to the Apple Neural Engine / GPU on Apple Silicon.
+if(APPLE)
+  file(GLOB _ort_prebuilt_dylibs
+    "${ort_prebuilt_SOURCE_DIR}/lib/libonnxruntime.*.dylib")
+  list(FILTER _ort_prebuilt_dylibs EXCLUDE REGEX "providers")
+  if(_ort_prebuilt_dylibs)
+    list(SORT _ort_prebuilt_dylibs)
+    list(GET _ort_prebuilt_dylibs -1 ORT_APPLE_DYLIB)
+    get_filename_component(ORT_APPLE_DYLIB_NAME "${ORT_APPLE_DYLIB}" NAME)
+    set(ORT_APPLE_DYLIB_DIR "${ort_prebuilt_SOURCE_DIR}/lib")
+    message(STATUS "ONNX Runtime: macOS — official prebuilt dylib with CoreML EP")
+    message(STATUS "  ${ORT_APPLE_DYLIB}")
+  else()
+    message(WARNING
+      "ONNX Runtime: official prebuilt dylib not found in "
+      "${ort_prebuilt_SOURCE_DIR}/lib — falling back to conda-forge (CPU-only, no CoreML EP)")
+    set(ORT_APPLE_DYLIB "${ORT_SHARED_LIB}")
+    get_filename_component(ORT_APPLE_DYLIB_NAME "${ORT_APPLE_DYLIB}" NAME)
+    set(ORT_APPLE_DYLIB_DIR "${ORT_SHARED_LIB_DIR}")
+  endif()
+endif()
+
+# Step 4b — create import target
 add_library(onnxruntime::onnxruntime SHARED IMPORTED GLOBAL)
-set_target_properties(onnxruntime::onnxruntime PROPERTIES
-  IMPORTED_LOCATION             "${ORT_SHARED_LIB}"
-  INTERFACE_INCLUDE_DIRECTORIES "${ort_prebuilt_SOURCE_DIR}/include")
+if(APPLE)
+  set_target_properties(onnxruntime::onnxruntime PROPERTIES
+    IMPORTED_LOCATION             "${ORT_APPLE_DYLIB}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ort_prebuilt_SOURCE_DIR}/include")
+else()
+  set_target_properties(onnxruntime::onnxruntime PROPERTIES
+    IMPORTED_LOCATION             "${ORT_SHARED_LIB}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ort_prebuilt_SOURCE_DIR}/include")
+endif()
 message(STATUS "ONNX Runtime headers: ${ort_prebuilt_SOURCE_DIR}/include")
 
 # ── macOS: flat-namespace Python preload + libatomic stub ─────────────────────
@@ -197,10 +228,28 @@ target_link_libraries(camera_detector_cpp
   ${OpenCV_LIBS}
   $<$<PLATFORM_ID:Darwin>:${_python_lib}>
 )
-set_target_properties(camera_detector_cpp PROPERTIES
-  BUILD_RPATH "$ORIGIN;${ORT_SHARED_LIB_DIR}"
-  INSTALL_RPATH "$ORIGIN;${ORT_SHARED_LIB_DIR}"
-)
+if(APPLE)
+  # Use @loader_path so the binary finds the dylib in its own directory.
+  # The post-build command below copies the CoreML-enabled dylib there.
+  set_target_properties(camera_detector_cpp PROPERTIES
+    BUILD_RPATH   "@loader_path;${ORT_APPLE_DYLIB_DIR}"
+    INSTALL_RPATH "@loader_path"
+  )
+  add_custom_command(TARGET camera_detector_cpp POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${ORT_APPLE_DYLIB}"
+            "$<TARGET_FILE_DIR:camera_detector_cpp>/${ORT_APPLE_DYLIB_NAME}"
+    COMMENT "Copying ONNX Runtime dylib (CoreML EP) → build dir"
+    VERBATIM
+  )
+  install(FILES "${ORT_APPLE_DYLIB}" DESTINATION lib/${PROJECT_NAME})
+  message(STATUS "ONNX Runtime: macOS — CoreML EP dylib will be copied to binary dir at build time")
+else()
+  set_target_properties(camera_detector_cpp PROPERTIES
+    BUILD_RPATH "$ORIGIN;${ORT_SHARED_LIB_DIR}"
+    INSTALL_RPATH "$ORIGIN;${ORT_SHARED_LIB_DIR}"
+  )
+endif()
 if(UNIX AND NOT APPLE)
   set(_ort_post_build_cmds
     COMMAND "${CMAKE_COMMAND}" -E create_symlink
