@@ -120,19 +120,117 @@ Projects every point and returns the **indices** of those whose pixel coordinate
 
 ---
 
-## KITTI Example Values
+## Intrinsics — What the Numbers Mean
 
-For sequence `2011_09_26_drive_0001_sync`, left colour camera:
+Intrinsics describe the **geometry of the camera lens/sensor itself**, independent of where the camera is physically placed.
 
-| Parameter | Value |
-|---|---|
-| `fx = fy` | 721.54 px |
-| `cx` | 609.56 px |
-| `cy` | 172.85 px |
-| Image size | 1242 × 375 |
-| P2 translation (x) | +44.86 mm (stereo baseline offset) |
-| T rotation | ~180° around Y — Velodyne faces forward, camera faces forward, axes differ |
-| T translation z | −0.272 m (Velodyne is ~27 cm above camera optical centre) |
+### The K matrix (3×3)
+
+```
+K = [ fx    0   cx ]     [ 721.54    0      609.56 ]
+    [  0   fy   cy ]  =  [   0     721.54   172.85 ]
+    [  0    0    1 ]     [   0       0        1    ]
+```
+
+| Parameter | Value | Meaning |
+|---|---|---|
+| `fx` | 721.54 px | Pixels per metre horizontally at 1 m depth — how "zoomed in" the lens is |
+| `fy` | 721.54 px | Same vertically. Equal to `fx` → square pixels |
+| `cx` | 609.56 px | Horizontal pixel where the optical axis hits the sensor (~centre of 1242 px wide image) |
+| `cy` | 172.85 px | Vertical pixel. **Not** at image centre (375/2 = 187.5) — the optical axis hits slightly above centre |
+
+**Geometric meaning:** a real-world point at `(X, Y, Z)` in the camera frame projects to pixel:
+
+```
+u = fx × (X / Z) + cx
+v = fy × (Y / Z) + cy
+```
+
+`X/Z` is the horizontal angle (small-angle approximation). `fx` scales that angle into pixels. `cx`/`cy` shift the origin from the image centre to the top-left corner (pixel `(0,0)`).
+
+**Why `fx == fy`?** Square pixels. On fisheye or anamorphic lenses they differ.
+
+---
+
+### The P matrix (3×4)
+
+```
+P2 = [ 721.54    0      609.56   44.86  ]
+     [   0     721.54   172.85    0.22  ]
+     [   0       0        1.0    0.0027 ]
+```
+
+P2 is K extended to 3×4 to accept homogeneous 4-vectors, **plus a stereo baseline offset in the last column**:
+
+```
+P2 = K × [ I | t_stereo ]
+```
+
+The last column `[44.86, 0.22, 0.0027]ᵀ` encodes the **physical offset between the left grayscale camera (cam0, the rectification reference) and the left colour camera (cam2)** — approximately 44.86 mm to the right. KITTI's `P_rect_02` bakes this in so you can project directly from the rectified frame into the colour camera image without a separate translation.
+
+At 10 m depth this shifts a projected pixel by `44.86 / 10 ≈ 4.5 px` — small but meaningful for precise depth.
+
+---
+
+## Extrinsics — Where the Camera Is Relative to the LiDAR
+
+Extrinsics describe the **rigid body transform** between two physical sensors: where one sensor's origin and axes are, as seen from the other sensor's frame.
+
+### The T matrix (4×4)
+
+```
+T = [ R (3×3) | t (3×1) ]
+
+  = [  7.53e-3   -9.999e-1   -6.17e-4  |  -4.07e-3 ]
+    [  1.48e-2    7.28e-4    -9.999e-1  |  -7.63e-2 ]
+    [  9.999e-1   7.52e-3     1.48e-2   |  -0.2718  ]
+    [  0          0           0         |   1.0     ]
+```
+
+**R (3×3 rotation):** the near-1 values on the anti-diagonal show this is approximately a **−90° rotation around X followed by −90° around Z**. This is physically correct: the Velodyne X-axis points forward and the camera Z-axis also points forward, but their Y/Z axes are oriented differently — a ~90° flip is needed to align them.
+
+**t (3×1 translation):** `[-0.004, -0.076, -0.272]` metres in camera frame:
+- `t_z = -0.272 m` → the camera optical centre is **27.2 cm below** the Velodyne origin
+- `t_y = -0.076 m` → ~7.6 cm lateral offset
+- `t_x = -0.004 m` → negligible fore-aft offset
+
+**What T does:**
+
+```
+P_cam = T × P_lidar
+
+[Xc]   [ R | t ] [Xl]
+[Yc] = [       ] [Yl]
+[Zc]   [ 0 | 1 ] [Zl]
+[ 1]              [ 1]
+```
+
+It takes a 3D point measured in the Velodyne coordinate system and expresses it in the camera coordinate system (`Zc > 0` = in front of the camera).
+
+**R_rect note:** KITTI raw data has a slight camera misalignment corrected by `R_rect_00`. In `calibration.yaml`, `R_rect_00` is **pre-multiplied into T** (`T = R_rect_00 × T_velo_to_cam`), so it never needs to be applied separately.
+
+---
+
+## Full Chain with Actual Numbers
+
+```
+Velodyne frame          Camera frame           Image plane
+  P_lidar     →  T  →    P_cam      →  P2  →   pixel (u,v)
+
+[Xl]   [  7.53e-3  -9.999e-1  -6.17e-4  -4.07e-3] [Xl]
+[Yl] → [  1.48e-2   7.28e-4   -9.999e-1 -7.63e-2] [Yl]  →  [Xc, Yc, Zc]
+[Zl]   [  9.999e-1  7.52e-3    1.48e-2  -0.2718 ] [Zl]
+[ 1]   [  0         0          0         1.0    ] [ 1]
+
+[u·w]   [721.54    0      609.56  44.86 ] [Xc]
+[v·w] = [  0    721.54    172.85   0.22 ] [Yc]
+[ w ]   [  0       0        1.0  0.0027] [Zc]
+                                          [ 1]
+
+u = u·w / w,   v = v·w / w
+```
+
+**In plain English:** rotate + translate the LiDAR point into camera-space, then use focal length and principal point to figure out which pixel it lands on.
 
 ---
 
