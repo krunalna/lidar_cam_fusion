@@ -119,7 +119,7 @@ def generate_launch_description():
             "min_cluster_points":  5,
             "sync_slop":           0.5,
             "publish_markers":     True,
-            "publish_debug_image": False,
+            "publish_debug_image": True,
         }],
         output="screen",
         emulate_tty=True,

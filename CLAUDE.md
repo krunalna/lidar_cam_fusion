@@ -262,7 +262,7 @@ Five macOS-specific workarounds are in `CMakeLists.txt`:
 - **libpython3.12 preload**: `rosidl_generator_py` uses flat-namespace Python symbol lookup; linking libpython explicitly ensures `_PyExc_*` symbols are available before the dylib loads
 - **numpy `_core/include` stub**: rclcpp's cmake config lists `numpy/_core/include` in its `INTERFACE_INCLUDE_DIRECTORIES`; after a fresh pixi install the directory may not exist — CMakeLists.txt creates it automatically
 - **ONNX Runtime headers**: conda-forge's `onnxruntime` package for macOS is Python-only (no C++ headers). CMakeLists.txt uses `FetchContent` to download the matching official prebuilt (version queried from the Python package) on first configure. Headers land flat in `include/` so the include is `#include <onnxruntime_cxx_api.h>`
-- **ONNX Runtime CoreML EP (GPU)**: conda-forge's `onnxruntime` dylib is CPU-only — it does not include the CoreML execution provider. CMakeLists.txt therefore uses the `.dylib` from the GitHub official prebuilt (which includes CoreML EP) instead of the one in `site-packages/onnxruntime/capi/`. A post-build command copies the dylib into the binary directory so `@loader_path` resolution works. On startup, `camera_detector_cpp` logs the active provider: `CoreML` = Apple Neural Engine / GPU; `CPU` = fallback (rebuild required).
+- **ONNX Runtime CoreML EP (GPU)**: conda-forge's `onnxruntime` dylib is CPU-only — it does not include the CoreML execution provider. CMakeLists.txt therefore uses the `.dylib` from the GitHub official prebuilt (which includes CoreML EP) instead of the one in `site-packages/onnxruntime/capi/`. A post-build command copies the dylib into the binary directory so `@loader_path` resolution works. On startup, `camera_detector_cpp` logs the active provider: `CoreML` = default CoreML compute units (CPUAndGPU); `CPU` = fallback (rebuild required). Note: passing explicit `MLComputeUnits` options throws on this ONNX Runtime version — CoreML EP is invoked with no options.
 
 ## C++ Camera Detector — Execution Provider Priority
 
@@ -271,7 +271,7 @@ Five macOS-specific workarounds are in `CMakeLists.txt`:
 | Priority | Provider | Platform | Hardware |
 |---|---|---|---|
 | 1 | `CUDAExecutionProvider` | Linux | NVIDIA GPU |
-| 2 | `CoreMLExecutionProvider` | macOS | Apple Neural Engine / GPU |
+| 2 | `CoreMLExecutionProvider` | macOS | GPU / Apple Neural Engine (default CoreML compute units) |
 | 3 | CPU | any | CPU fallback |
 
 The active provider is logged at startup. A `WARN` is emitted if CPU fallback is used.
