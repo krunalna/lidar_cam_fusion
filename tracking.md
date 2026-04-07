@@ -128,3 +128,100 @@ Suggested script naming:
 - DeepSORT uses a local ONNX ReID model path parameter.
 - CPU fallback is supported for ReID inference.
 - All tracking nodes and wrappers are C++ (no Python tracking wrappers).
+
+---
+
+# SOTA Tracking Integration Plan (Incremental Stack)
+
+This section captures the advanced state-of-the-art integration roadmap on top
+of the base tracking plan above.
+
+## Summary
+
+- Integrate SOTA tracking in this fixed order:
+  - `bytetrack3d`
+  - `deepocsort2d`
+  - `transformer_e2e`
+- Keep practical real-time operation as primary goal, with GPU-preferred
+  runtime profiles for appearance/model-heavy methods.
+- Preserve existing fusion outputs and add tracked outputs using
+  `vision_msgs` ID fields.
+- Keep all tracking logic and wrappers in C++.
+
+## Public Interfaces and Runtime Selection
+
+- Extend backend selector to:
+  - `tracker_backend:=off|centroid3d|kalman3d|bytetrack3d|deepocsort2d|transformer_e2e`
+- Keep tracked output contracts:
+  - `/detections_3d_tracked` (`vision_msgs/Detection3DArray`)
+  - `/detections_2d_tracked` for appearance-driven backends
+- Launch/runtime arguments:
+  - `enable_tracking`
+  - `tracker_backend`
+  - `tracker_profile:=realtime|accuracy`
+  - `reid_model_path`
+  - `transformer_model_path`
+
+## Phased Implementation
+
+1. `bytetrack3d` production backend
+- Input: `/detections_3d_fused`
+- Add 3D Kalman state + two-stage score-aware association (high score then low
+  score recovery), class-aware matching, Hungarian assignment, and track
+  lifecycle (`tentative/confirmed/lost/deleted`)
+- Output stable IDs in `Detection3D.id`
+- Set default backend to `bytetrack3d` after rollout
+
+2. `deepocsort2d` appearance-enhanced backend
+- Inputs: `/camera/image_raw` + `/detections_2d`
+- Add C++ ONNX ReID extractor and adaptive motion+appearance association
+- Publish `/detections_2d_tracked`
+- Route fusion input to tracked 2D detections and propagate IDs into 3D
+
+3. `transformer_e2e` research backend
+- Add experimental backend slot and inference wrapper for transformer-style MOT
+- Reuse the same tracked topic contracts for downstream compatibility
+- Gate with `tracker_profile:=accuracy` and explicit model path
+- Fallback to `bytetrack3d` when transformer model is unavailable
+
+## Verification Tasks
+
+- `verify-tracking-interface`
+- `verify-tracking-bytetrack3d`
+- `verify-tracking-deepocsort2d`
+- `verify-tracking-id-propagation`
+- `verify-tracking-transformer-e2e`
+- `verify-tracking-runtime-profile`
+- `verify-tracking` (aggregate)
+
+## Test Cases and Acceptance Criteria
+
+- Contract checks:
+  - backend enum parsing
+  - invalid backend handling
+  - deterministic ID formatting
+- Sequence checks:
+  - single-object continuity
+  - multi-object crossing
+  - temporary occlusion
+  - enter/exit lifecycle handling
+- Comparative checks:
+  - `bytetrack3d` vs `kalman3d` on ID-switch behavior in scripted cases
+  - `deepocsort2d` vs `bytetrack3d` under appearance-preserving occlusion
+- Launch checks:
+  - mode switching via launch-only config for all backends
+- Runtime checks:
+  - realtime profile throughput on KITTI playback cadence
+  - accuracy profile with higher-latency allowance
+- Robustness checks:
+  - DDS-restricted environments downgraded to warnings in dry-run verifiers
+
+## Assumptions and Defaults
+
+- Practical real-time behavior remains priority.
+- GPU-preferred runtime is assumed for appearance/transformer backends.
+- No custom ROS message types are introduced; `vision_msgs` IDs remain the
+  canonical track identity.
+- Missing model paths must fail fast with clear logs and no pipeline crash.
+- Final default backend is `bytetrack3d`, with advanced modes selectable
+  through launch configuration.
