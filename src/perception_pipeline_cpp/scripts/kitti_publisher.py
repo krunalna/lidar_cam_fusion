@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 KITTI Publisher Node
 ====================
@@ -16,24 +17,22 @@ Parameters:
   camera_id      (str)   Which camera folder to read. Default: image_02 (left color)
 
 Usage:
-  pixi run ros2 run perception_pipeline kitti_publisher \
+  pixi run ros2 run perception_pipeline_cpp kitti_publisher \
       --ros-args -p sequence_path:=/path/to/sequence -p frame_rate:=10.0
 """
 
 from datetime import datetime, timezone
 from pathlib import Path
 
-import cv2
 import numpy as np
 import rclpy
+from PIL import Image as PILImage
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import Image, PointCloud2, PointField
 from std_msgs.msg import Header
 
-
-# ── PointCloud2 helper (avoids cv_bridge / sensor_msgs_py version skew) ───────
 
 _POINTCLOUD_DTYPE = np.dtype([
     ("x", np.float32),
@@ -44,10 +43,7 @@ _POINTCLOUD_DTYPE = np.dtype([
 
 
 def _bin_to_pointcloud2(bin_path: Path, header: Header) -> PointCloud2:
-    """Convert a KITTI .bin point cloud file to a sensor_msgs/PointCloud2 message.
-
-    KITTI Velodyne format: binary float32 array, each point = [x, y, z, intensity].
-    """
+    """Convert a KITTI .bin point cloud file to sensor_msgs/PointCloud2."""
     raw = np.fromfile(bin_path, dtype=np.float32).reshape(-1, 4)
 
     msg = PointCloud2()
@@ -57,28 +53,23 @@ def _bin_to_pointcloud2(bin_path: Path, header: Header) -> PointCloud2:
     msg.is_bigendian = False
     msg.is_dense = True
 
-    itemsize = np.dtype(np.float32).itemsize  # 4 bytes
+    itemsize = np.dtype(np.float32).itemsize
     msg.fields = [
         PointField(name="x",         offset=0 * itemsize, datatype=PointField.FLOAT32, count=1),
         PointField(name="y",         offset=1 * itemsize, datatype=PointField.FLOAT32, count=1),
         PointField(name="z",         offset=2 * itemsize, datatype=PointField.FLOAT32, count=1),
         PointField(name="intensity", offset=3 * itemsize, datatype=PointField.FLOAT32, count=1),
     ]
-    msg.point_step = 4 * itemsize   # 16 bytes per point
+    msg.point_step = 4 * itemsize
     msg.row_step = msg.point_step * msg.width
     msg.data = raw.tobytes()
     return msg
 
 
 def _png_to_image(png_path: Path, header: Header) -> Image:
-    """Convert a PNG file to a sensor_msgs/Image message (rgb8 encoding).
-
-    Does not require cv_bridge — converts directly via numpy.
-    """
-    bgr = cv2.imread(str(png_path))
-    if bgr is None:
-        raise FileNotFoundError(f"Could not read image: {png_path}")
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    """Convert a PNG file to a sensor_msgs/Image message (rgb8 encoding)."""
+    with PILImage.open(png_path) as image:
+        rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
 
     msg = Image()
     msg.header = header
@@ -91,13 +82,10 @@ def _png_to_image(png_path: Path, header: Header) -> Image:
     return msg
 
 
-# ── Node ──────────────────────────────────────────────────────────────────────
-
 class KittiPublisherNode(Node):
     def __init__(self):
         super().__init__("kitti_publisher")
 
-        # ── Parameters ────────────────────────────────────────────────────────
         self.declare_parameter("sequence_path", "")
         self.declare_parameter("frame_rate", 10.0)
         self.declare_parameter("loop", True)
@@ -118,22 +106,14 @@ class KittiPublisherNode(Node):
         self._seq_path = Path(seq_path_str)
         self._validate_sequence_dir(camera_id)
 
-        # ── File lists (sorted = chronological) ───────────────────────────────
-        self._image_files = sorted(
-            (self._seq_path / camera_id / "data").glob("*.png")
-        )
-        self._lidar_files = sorted(
-            (self._seq_path / "velodyne_points" / "data").glob("*.bin")
-        )
+        self._image_files = sorted((self._seq_path / camera_id / "data").glob("*.png"))
+        self._lidar_files = sorted((self._seq_path / "velodyne_points" / "data").glob("*.bin"))
 
         n_img = len(self._image_files)
         n_lid = len(self._lidar_files)
         if n_img == 0 or n_lid == 0:
-            raise RuntimeError(
-                f"No data found in sequence: images={n_img}, lidar={n_lid}"
-            )
+            raise RuntimeError(f"No data found in sequence: images={n_img}, lidar={n_lid}")
 
-        # KITTI sequences are always paired; warn if counts differ
         if n_img != n_lid:
             self.get_logger().warn(
                 f"Frame count mismatch: {n_img} images vs {n_lid} lidar scans. "
@@ -143,65 +123,52 @@ class KittiPublisherNode(Node):
         self._n_frames = min(n_img, n_lid)
         self._frame_idx = 0
 
-        # ── KITTI timestamps ──────────────────────────────────────────────────
         ts_path = self._seq_path / camera_id / "timestamps.txt"
         self._timestamps = self._load_timestamps(ts_path) if ts_path.exists() else None
         if self._timestamps is None:
             self.get_logger().warn(
                 f"No timestamps.txt found at {ts_path}. "
-                "Falling back to wall-clock stamps — KITTI ground-truth alignment disabled."
+                "Falling back to wall-clock stamps - KITTI ground-truth alignment disabled."
             )
 
-
-        # ── QoS — reliable, small queue (KITTI is playback, not a lossy sensor)
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
             depth=5,
         )
 
-        # ── Publishers ────────────────────────────────────────────────────────
         self._img_pub = self.create_publisher(Image, "/camera/image_raw", qos)
         self._pc_pub = self.create_publisher(PointCloud2, "/lidar/points", qos)
 
-        # ── Timer ─────────────────────────────────────────────────────────────
         period = 1.0 / self._frame_rate
         self._timer = self.create_timer(period, self._publish_frame)
 
         self.get_logger().info(
-            f"KittiPublisher ready — {self._n_frames} frames @ {self._frame_rate} Hz"
+            f"KittiPublisher ready - {self._n_frames} frames @ {self._frame_rate} Hz"
             f"  loop={self._loop}  seq={self._seq_path.name}"
         )
 
-    # ── Internal ──────────────────────────────────────────────────────────────
-
     def _validate_sequence_dir(self, camera_id: str) -> None:
-        """Check that the expected KITTI subdirectories exist."""
         required = [
             self._seq_path / camera_id / "data",
             self._seq_path / "velodyne_points" / "data",
         ]
-        for d in required:
-            if not d.is_dir():
+        for directory in required:
+            if not directory.is_dir():
                 raise RuntimeError(
-                    f"Expected directory not found: {d}\n"
+                    f"Expected directory not found: {directory}\n"
                     "Ensure sequence_path points to a KITTI raw sync sequence, e.g.:\n"
                     "  2011_09_26/2011_09_26_drive_0001_sync/"
                 )
 
     @staticmethod
     def _load_timestamps(ts_path: Path) -> list[Time]:
-        """Parse a KITTI timestamps.txt into a list of rclpy.time.Time objects.
-
-        Each line has the format: 2011-09-26 13:02:25.820513000
-        """
         times: list[Time] = []
-        with ts_path.open() as f:
-            for line in f:
+        with ts_path.open() as handle:
+            for line in handle:
                 line = line.strip()
                 if not line:
                     continue
-                # Replace space with T so fromisoformat can parse it
                 dt = datetime.fromisoformat(line.replace(" ", "T"))
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
@@ -226,25 +193,23 @@ class KittiPublisherNode(Node):
         else:
             stamp = self.get_clock().now().to_msg()
 
-        # Publish image
         try:
             img_header = Header()
             img_header.stamp = stamp
             img_header.frame_id = "camera_left"
             img_msg = _png_to_image(self._image_files[idx], img_header)
             self._img_pub.publish(img_msg)
-        except Exception as e:
-            self.get_logger().error(f"Image frame {idx}: {e}")
+        except Exception as exc:
+            self.get_logger().error(f"Image frame {idx}: {exc}")
 
-        # Publish point cloud
         try:
             pc_header = Header()
-            pc_header.stamp = stamp      # same stamp → fused downstream
+            pc_header.stamp = stamp
             pc_header.frame_id = "velodyne"
             pc_msg = _bin_to_pointcloud2(self._lidar_files[idx], pc_header)
             self._pc_pub.publish(pc_msg)
-        except Exception as e:
-            self.get_logger().error(f"LiDAR frame {idx}: {e}")
+        except Exception as exc:
+            self.get_logger().error(f"LiDAR frame {idx}: {exc}")
 
         if idx % 50 == 0:
             self.get_logger().info(f"Publishing frame {idx}/{self._n_frames - 1}")
@@ -252,19 +217,16 @@ class KittiPublisherNode(Node):
         self._frame_idx += 1
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
-
 def main(args=None):
     rclpy.init(args=args)
     try:
         node = KittiPublisherNode()
         rclpy.spin(node)
-    except RuntimeError as e:
-        print(f"[kitti_publisher] Fatal: {e}")
-    except KeyboardInterrupt:
-        pass
+    except RuntimeError as exc:
+        print(exc)
     finally:
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

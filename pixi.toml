@@ -9,22 +9,34 @@ platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 [feature.base.dependencies]
 colcon-common-extensions = "*"
 numpy = ">=1.24,<2.0"
+pillow = "*"
+py-opencv = ">=4.7"
 pyyaml = "*"
-scipy = "*"
 
 [feature.base.pypi-dependencies]
-opencv-python = ">=4.7"
 ultralytics = ">=8.0"
+onnx = ">=1.12.0,<2.0.0"
+onnxslim = ">=0.1.71"
+
+# GPU-enabled ONNX Runtime on Linux (RTX A4000 / CUDA 12).
+# Provides the same `onnxruntime` Python module — the C++ CMakeLists locates
+# the shared library through `import onnxruntime` so no CMake changes needed.
+[feature.base.target.linux-64.pypi-dependencies]
+onnxruntime-gpu = ">=1.17"
 
 [feature.base.tasks]
-build    = "colcon build --symlink-install --packages-select perception_pipeline"
-launch   = "ros2 launch perception_pipeline fusion_pipeline.launch.py"
+build    = "colcon build --symlink-install --packages-select perception_pipeline_cpp --cmake-args -DCMAKE_BUILD_TYPE=Release"
+launch   = "ros2 launch perception_pipeline_cpp fusion_pipeline_cpp.launch.py"
 play-bag = "ros2 bag play $BAG_PATH --loop"
-foxglove  = "ros2 launch foxglove_bridge foxglove_bridge_launch.xml"
+foxglove  = "python scripts/run_foxglove.py"
 verify-env       = "python scripts/verify_env.py"
 verify-publisher = "python scripts/verify_publisher.py"
-verify3       = "python scripts/verify_step3.py"
+verify-lidar     = "python scripts/verify_lidar.py"
+verify-camera    = "python scripts/verify_camera.py"
+verify-projections = "python scripts/verify_projections.py"
+verify-fusion      = "python scripts/verify_fusion.py"
 download-kitti = "python scripts/download_kitti.py"
+export-onnx    = "python scripts/export_yolo_onnx.py"
 
 # ── ROS 2 Jazzy (Python 3.12, Ubuntu 24.04 / macOS) ──────────────────────────
 [feature.jazzy]
@@ -35,21 +47,39 @@ python = "3.12.*"
 ros-jazzy-ros-base = "*"
 ros-jazzy-sensor-msgs = "*"
 ros-jazzy-vision-msgs = "*"
-ros-jazzy-tf2-ros = "*"
 ros-jazzy-message-filters = "*"
 ros-jazzy-visualization-msgs = "*"
 ros-jazzy-rosbag2-py = "*"
 ros-jazzy-rosbag2-storage-default-plugins = "*"
 ros-jazzy-foxglove-bridge = "*"
 
+# ── C++ build deps ────────────────────────────────────────────────────────────
+[feature.cpp.dependencies]
+cmake        = ">=3.22"
+ninja        = "*"
+libopencv    = ">=4.7"
+pcl          = ">=1.13"
+
+# onnxruntime-gpu is not in conda-forge; install via PyPI on Linux.
+# CUDA runtime libraries needed by onnxruntime-gpu come from conda-forge.
+# macOS and aarch64 stay on the CPU conda package.
+[feature.cpp.target.linux-64.dependencies]
+cuda-cudart = ">=12.2,<13"
+libcublas   = ">=12,<13"
+libcurand   = ">=10,<11"
+libcufft    = ">=11,<12"
+cudnn       = ">=9,<10"
+
+[feature.cpp.target.linux-aarch64.dependencies]
+onnxruntime = ">=1.17"
+
+[feature.cpp.target.osx-arm64.dependencies]
+onnxruntime = ">=1.17"
+
 [feature.jazzy.activation]
 scripts = ["scripts/activate_ros.sh"]
 
-# ── Open3D: conda-forge build — all platforms (PyPI wheels only go to Py 3.11)
-[feature.open3d.dependencies]
-open3d = ">=0.17"
-
 # ── Named environments ────────────────────────────────────────────────────────
 [environments]
-default = { features = ["base", "jazzy", "open3d"], solve-group = "jazzy" }
-jetson  = { features = ["base", "jazzy", "open3d"], solve-group = "jazzy" }
+default = { features = ["base", "jazzy", "cpp"], solve-group = "jazzy" }
+jetson  = { features = ["base", "jazzy", "cpp"], solve-group = "jazzy" }
